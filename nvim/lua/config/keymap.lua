@@ -2,8 +2,21 @@ vim.g.mapleader = " " -- space
 
 vim.keymap.set("n", "<leader>fv", vim.cmd.NvimTreeToggle, { desc = "Toggle Nvim Tree" })
 
--- Undotree
--- TODO (based on primeagin vid)
+vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv", { desc = "Move highlighted section up" })
+vim.keymap.set("v", "K", ":m '<-2<CR>gv=gv", { desc = "Move highlighted section down" })
+
+vim.keymap.set("n", "<C-d>", "<C-d>zz", { desc = "Jump down centers view" })
+vim.keymap.set("n", "<C-u>", "<C-u>zz", { desc = "Jump up centers view" })
+vim.keymap.set("n", "n", "nzzzv", { desc = "Keeps cursor in middle during next search" })
+vim.keymap.set("n", "N", "Nzzzv", { desc = "Keeps cursor in middle during previous search" })
+
+vim.keymap.set("x", "<leader>p", "\"_dp", { desc = "Paste but keeps the originally highlighted text" })
+vim.keymap.set({ "n", "v" }, "<leader>y", [["+y]], { desc = "Yank to system clipboard" })
+
+vim.keymap.set("n", "<leader>s", [[:%s/\<<C-r><C-w>\>/<C-r><C-w>/gI<Left><Left><Left>]],
+  { desc = "Highlights and replaces all instances of text at the cursor (ie, find and replace all shortcut)" })
+
+vim.keymap.set("n", "<leader>x", "<cmd>!chmod +x %<CR>", { desc = "Makes current file executable", silent = true })
 
 -- LSP keymaps
 local keymap = vim.keymap -- for conciseness

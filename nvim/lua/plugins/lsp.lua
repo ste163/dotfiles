@@ -17,6 +17,7 @@ vim.pack.add({
   }
 })
 
+-- Package manger for LSPs
 require("mason").setup({
   ui = {
     icons = {
@@ -39,6 +40,7 @@ require("mason-lspconfig").setup({
   }
 })
 
+-- Auto completion
 require('blink.cmp').setup()
 
 -- Setup icons

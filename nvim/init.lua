@@ -10,6 +10,7 @@ require('plugins.lsp')
 require('plugins.conform')
 require('plugins.nvim-tree')
 require('plugins.undotree')
+require('plugins.fugitive')
 
 require('plugins.lualine')
 require('plugins.rose-pine') -- may also need to be low to ensure theme is applied properly
