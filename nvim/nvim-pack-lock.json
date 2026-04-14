@@ -10,6 +10,11 @@
       "src": "https://github.com/stevearc/conform.nvim",
       "version": "'v9.1.0'"
     },
+    "diffview.nvim": {
+      "rev": "3832c234e20fef1aef81600e5c87451617586f83",
+      "src": "https://github.com/dlyongemallo/diffview.nvim",
+      "version": "'v0.30'"
+    },
     "lualine.nvim": {
       "rev": "47f91c416daef12db467145e16bed5bbfe00add8",
       "src": "https://github.com/nvim-lualine/lualine.nvim",
