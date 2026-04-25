@@ -24,10 +24,74 @@ Move the config file into: `~/.tmux.conf`
 
 ## neovim
 
-> Config uses built-in package manager. Requires 0.12+
+> Setup using NVIM v0.12.2, using the built-in package manager. 
 
-Move the `nvim` directory into:
-`~/.config`
+Move the `nvim` directory into `~/.config`:
 
-Download `neovim` directly from the repo. We want to ensure that once the setup is working, it stays solid for good until we want to specify an upgrade.
+```sh
+mv nvim ~/.config/nvim
+```
+
+### Removing neovim
+
+1. Delete the install directory:
+    ```sh
+    sudo rm -rf /opt/nvim
+    ```
+
+> This does not remove your config at `~/.config/nvim`.
+
+### Installing neovim
+
+#### Fresh macOS install 
+
+1. Download v0.12.2 from nvim github
+2. Extract the archive:
+    ```sh
+    tar xzf nvim-macos-arm64.tar.gz
+    ```
+3. Clear the macOS quarantine flag (required or it will be blocked from running):
+    ```sh
+    xattr -cr nvim-macos-arm64
+    ```
+4. Move to `/opt/`:
+    ```sh
+    sudo mv nvim-macos-arm64 /opt/nvim
+    ```
+5. Add nvim to your PATH in `~/.zshrc`:
+    ```sh
+    export PATH="$PATH:/opt/nvim/bin"
+    ```
+6. Reload your shell:
+    ```sh
+    source ~/.zshrc
+    ```
+7. Verify:
+    ```sh
+    nvim --version
+    ```
+
+#### Reinstall / upgrade (PATH already configured)
+
+1. Remove the old version:
+    ```sh
+    sudo rm -rf /opt/nvim
+    ```
+2. Download `nvim-macos-arm64.tar.gz` from the [neovim releases page](https://github.com/neovim/neovim/releases)
+3. Extract the archive:
+    ```sh
+    tar xzf nvim-macos-arm64.tar.gz
+    ```
+4. Clear the macOS quarantine flag:
+    ```sh
+    xattr -cr nvim-macos-arm64
+    ```
+5. Move to `/opt/`:
+    ```sh
+    sudo mv nvim-macos-arm64 /opt/nvim
+    ```
+6. Verify:
+    ```sh
+    nvim --version
+    ```
 
