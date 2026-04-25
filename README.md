@@ -1,5 +1,8 @@
 # Dotfiles 
 
+## font
+Install the Nerd font.
+
 ## oh-my-zsh (.zshrc)
 
 1. Install `oh-my-zsh`
@@ -12,7 +15,7 @@ Move the config file into: `~/.tmux.conf`
 ### Mac
 
 1. `brew install tmux`
-2. Open the `.terminal` profile in `Terminal` 
+2. Open the `.terminal` profile in `Terminal`
 
 #### Btop (Mac specific)
 
