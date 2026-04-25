@@ -14,6 +14,7 @@ Move the config file into:
 
 1. `brew install tmux`
 2. Open the `.terminal` profile in `Terminal` 
+3. `brew install btop` for system resource usage. Move the conf file to `~/.config/btop/btop.conf`
 
 
 ## neovim
@@ -24,3 +25,4 @@ Move the `nvim` directory into:
 `~/.config`
 
 Download `neovim` directly from the repo. We want to ensure that once the setup is working, it stays solid for good until we want to specify an upgrade.
+
