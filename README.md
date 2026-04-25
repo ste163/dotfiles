@@ -7,15 +7,17 @@
 
 ## tmux 
 
-Move the config file into:
-`~/.tmux.conf`
+Move the config file into: `~/.tmux.conf`
 
 ### Mac
 
 1. `brew install tmux`
 2. Open the `.terminal` profile in `Terminal` 
-3. `brew install btop` for system resource usage. Move the conf file to `~/.config/btop/btop.conf`
 
+#### Btop (Mac specific)
+
+1. `brew install btop` for system resource usage.
+2. Move the conf file to `~/.config/btop/btop.conf`
 
 ## neovim
 
