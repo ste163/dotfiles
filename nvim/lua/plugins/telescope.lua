@@ -1,4 +1,4 @@
--- Fuzzy file finder in a command pallete view
+-- Fuzzy file finder in a command palette view
 vim.pack.add({
   {
     src = 'https://github.com/nvim-lua/plenary.nvim',
@@ -14,4 +14,6 @@ vim.pack.add({
 })
 
 local builtin = require('telescope.builtin')
+
 vim.keymap.set('n', '<leader>ff', builtin.find_files, { desc = 'Telescope find files' })
+vim.keymap.set('n', '<leader>fa', builtin.live_grep, { desc = 'Telescope find all instances of text' })

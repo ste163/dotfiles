@@ -4,4 +4,15 @@ vim.pack.add({ {
   version = 'v1.15.0'
 } })
 
-require("nvim-tree").setup()
+require("nvim-tree").setup({
+  filters = {
+    git_ignored = false -- Disable hiding .gitignored files/dirs
+  },
+  update_focused_file = {
+    enable = true -- Have nvim-tree's selected file match the open buffer
+  },
+  view = {
+    side = "right",
+    adaptive_size = true
+  }
+})

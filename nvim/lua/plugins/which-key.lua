@@ -7,4 +7,8 @@ vim.pack.add({
   }
 })
 
-
+require("which-key").setup({
+  win = {
+    border = "rounded",
+  },
+})

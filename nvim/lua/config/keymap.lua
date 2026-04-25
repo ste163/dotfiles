@@ -1,6 +1,7 @@
 vim.g.mapleader = " " -- space
 
 vim.keymap.set("n", "<leader>fv", vim.cmd.NvimTreeToggle, { desc = "Toggle Nvim Tree" })
+vim.keymap.set('n', 'q', '<Nop>') -- Disable q from enabling macro recording
 
 vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv", { desc = "Move highlighted section up" })
 vim.keymap.set("v", "K", ":m '<-2<CR>gv=gv", { desc = "Move highlighted section down" })
@@ -17,6 +18,13 @@ vim.keymap.set("n", "<leader>s", [[:%s/\<<C-r><C-w>\>/<C-r><C-w>/gI<Left><Left><
   { desc = "Highlights and replaces all instances of text at the cursor (ie, find and replace all shortcut)" })
 
 vim.keymap.set("n", "<leader>x", "<cmd>!chmod +x %<CR>", { desc = "Makes current file executable", silent = true })
+
+vim.keymap.set('n', '<leader>t', ':botright 20new | term<CR>',
+  { desc = "Open a terminal at the bottom of buffer", silent = true })
+vim.keymap.set('t', '<Esc>', [[<C-\><C-n>]], { noremap = true, desc = "Exit the terminal" })
+
+vim.keymap.set("n", "<C-_>", "gcc", { remap = true, desc = "Toggle comments" })
+vim.keymap.set("v", "<C-_>", "gc", { remap = true, desc = "Toggle comments" })
 
 -- LSP keymaps
 local keymap = vim.keymap -- for conciseness
