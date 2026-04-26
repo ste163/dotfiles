@@ -1,6 +1,13 @@
 -- Native treesitter setup for Neovim 0.12+
 -- Bundled parsers: c, lua, markdown, vimdoc, vim
 -- Additional parsers below are installed automatically on first startup using tree-sitter-cli.
+--
+-- To force-reinstall a parser:
+--   1. Delete the parser file: ~/.local/share/nvim/site/parser/{lang}.so
+--   2. Restart nvim — it will be cloned and rebuilt automatically.
+--
+-- To force-reinstall all parsers:
+--   rm ~/.local/share/nvim/site/parser/*.so  (then restart nvim)
 
 -- Enable treesitter highlighting for every buffer that has a parser available.
 -- Fails silently (pcall) when no parser exists for the current filetype.
@@ -16,9 +23,9 @@ local parsers = {
   { lang = 'html',       repo = 'https://github.com/tree-sitter/tree-sitter-html' },
   { lang = 'json',       repo = 'https://github.com/tree-sitter/tree-sitter-json' },
   { lang = 'javascript', repo = 'https://github.com/tree-sitter/tree-sitter-javascript' },
-  { lang = 'typescript', repo = 'https://github.com/tree-sitter/tree-sitter-typescript', subdir = 'typescript' },
+  { lang = 'typescript', repo = 'https://github.com/tree-sitter/tree-sitter-typescript',   subdir = 'typescript' },
   { lang = 'css',        repo = 'https://github.com/tree-sitter/tree-sitter-css' },
-  { lang = 'yaml',       repo = 'https://github.com/ikatyang/tree-sitter-yaml' },
+  { lang = 'yaml',       repo = 'https://github.com/tree-sitter-grammars/tree-sitter-yaml' },
   { lang = 'dockerfile', repo = 'https://github.com/camdencheek/tree-sitter-dockerfile' },
 }
 
@@ -27,10 +34,14 @@ local parser_dir = vim.fn.stdpath('data') .. '/site/parser'
 vim.fn.mkdir(parser_dir, 'p')
 
 local function install_parser(info)
-  local parser_file = parser_dir .. '/' .. info.lang .. '.so'
-  if vim.fn.filereadable(parser_file) == 1 then
-    return -- already installed
+  -- Check if the parser is already loadable from any location in runtimepath.
+  -- This handles system-installed parsers, parsers from other tools, and
+  -- parsers we previously installed — not just our own install dir.
+  if vim.treesitter.language.add(info.lang) then
+    return
   end
+
+  local parser_file = parser_dir .. '/' .. info.lang .. '.so'
 
   local tmp_dir = vim.fn.tempname()
 
