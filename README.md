@@ -24,7 +24,7 @@ Move the config file into: `~/.tmux.conf`
 
 ## neovim
 
-> Setup using NVIM v0.12.2, using the built-in package manager. 
+> Setup using NVIM v0.12.2, using the built-in package manager and built-in tree-sitter
 
 Move the `nvim` directory into `~/.config`:
 
@@ -32,16 +32,9 @@ Move the `nvim` directory into `~/.config`:
 mv nvim ~/.config/nvim
 ```
 
-### Removing neovim
-
-1. Delete the install directory:
-    ```sh
-    sudo rm -rf /opt/nvim
-    ```
-
-> This does not remove your config at `~/.config/nvim`.
-
 ### Installing neovim
+
+1. Download the `tree-sitter-cli` from `brew` on macOS or other package manager
 
 #### Fresh macOS install 
 
@@ -71,7 +64,7 @@ mv nvim ~/.config/nvim
     nvim --version
     ```
 
-#### Reinstall / upgrade (PATH already configured)
+#### Reinstall / upgrade
 
 1. Remove the old version:
     ```sh
