@@ -71,29 +71,32 @@ vim.api.nvim_create_autocmd('FileType', {
 --   queries_prepend — line prepended to highlights.scm, e.g. '; inherits: javascript'
 --
 -- Multi-entries clone the repo once and build multiple parsers (e.g. tree-sitter-typescript).
--- Multi sub-parser extra fields:
---   queries_inherit — instead of copying queries, create a highlights.scm that only
---                     inherits from this language (used for tsx which has no own queries)
+-- Multi sub-parser extra fields are the same as single entries:
+--   queries_rel     — path inside tmp_dir to copy queries from (default: 'queries')
+--   queries_prepend — line prepended to highlights.scm
 local parsers = {
   { lang = 'html',       repo = 'https://github.com/tree-sitter/tree-sitter-html' },
   { lang = 'json',       repo = 'https://github.com/tree-sitter/tree-sitter-json' },
   { lang = 'javascript', repo = 'https://github.com/tree-sitter/tree-sitter-javascript' },
   {
     -- tree-sitter-typescript ships two grammars in one repo.
-    -- The TypeScript-specific queries live at the repo root (not in a subdir).
-    -- TSX has no dedicated queries; it inherits everything from typescript.
+    -- The repo root queries/ are intentionally designed for BOTH the typescript
+    -- and tsx parsers. We copy them directly to each language's queries dir so
+    -- that each parser compiles the queries against its own grammar — no chain.
+    -- Both inherit javascript for base JS highlighting.
     repo = 'https://github.com/tree-sitter/tree-sitter-typescript',
     multi = {
       {
-        lang           = 'typescript',
-        subdir         = 'typescript',
-        queries_rel    = 'queries',           -- root of repo
+        lang            = 'typescript',
+        subdir          = 'typescript',
+        queries_rel     = 'queries',              -- root of repo
         queries_prepend = '; inherits: (javascript)',
       },
       {
         lang            = 'tsx',
         subdir          = 'tsx',
-        queries_inherit = 'typescript',       -- no queries in repo; inherit from typescript
+        queries_rel     = 'queries',              -- same shared queries, compiled for tsx grammar
+        queries_prepend = '; inherits: (javascript)',
       },
     },
   },
@@ -141,15 +144,6 @@ local function install_queries(src_dir, lang, prepend)
     end
     vim.fn.writefile(lines, dest .. '/' .. fname)
   end
-end
-
--- Create a minimal highlights.scm that only delegates to another language's queries.
--- Used for tsx which has no dedicated queries in its repo.
--- Must be called on the main thread.
-local function create_inherit_queries(lang, inherit_from)
-  local dest = queries_dir .. '/' .. lang
-  vim.fn.mkdir(dest, 'p')
-  vim.fn.writefile({ '; inherits: ' .. inherit_from }, dest .. '/highlights.scm')
 end
 
 -- True only when both the parser .so is loadable AND a queries directory exists.
@@ -210,12 +204,8 @@ local function install_entry(entry, force)
 
           -- Install queries for each sub-parser before building.
           for _, p in ipairs(entry.multi) do
-            if p.queries_inherit then
-              create_inherit_queries(p.lang, p.queries_inherit)
-            else
-              local rel = p.queries_rel or 'queries'
-              install_queries(tmp_dir .. '/' .. rel, p.lang, p.queries_prepend)
-            end
+            local rel = p.queries_rel or 'queries'
+            install_queries(tmp_dir .. '/' .. rel, p.lang, p.queries_prepend)
           end
 
           -- Build all parsers; delete tmp_dir only after the last one finishes.
