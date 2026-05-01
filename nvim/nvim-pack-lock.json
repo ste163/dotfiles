@@ -35,6 +35,10 @@
       "src": "https://github.com/mason-org/mason.nvim",
       "version": "'v2.2.1'"
     },
+    "mini.animate": {
+      "rev": "72e04cf86ccbcd50efb53c2b87397386195bc3a7",
+      "src": "https://github.com/nvim-mini/mini.animate"
+    },
     "neovim": {
       "rev": "f01eac6eedf6197509dde8b66de0263207ee1877",
       "src": "https://github.com/rose-pine/neovim",
@@ -50,8 +54,12 @@
       "src": "https://github.com/nvim-tree/nvim-tree.lua",
       "version": "'v1.17.0'"
     },
+    "nvim-treesitter": {
+      "rev": "4916d6592ede8c07973490d9322f187e07dfefac",
+      "src": "https://github.com/nvim-treesitter/nvim-treesitter"
+    },
     "nvim-web-devicons": {
-      "rev": "c72328a5494b4502947a022fe69c0c47e53b6aa6",
+      "rev": "8069e89df2d7259704286a5906a11c5b27d5b440",
       "src": "https://github.com/nvim-tree/nvim-web-devicons"
     },
     "plenary.nvim": {
@@ -67,6 +75,10 @@
       "rev": "3333a52ff548ba0a68af6d8da1e54f9cd96e9179",
       "src": "https://github.com/nvim-telescope/telescope.nvim",
       "version": "'v0.2.1'"
+    },
+    "twilight.nvim": {
+      "rev": "664e752f4a219801265cc3fc18782b457b58c1e1",
+      "src": "https://github.com/folke/twilight.nvim"
     },
     "undotree": {
       "rev": "be23eacb2a63380bd79e207a738c728214ecc9d3",

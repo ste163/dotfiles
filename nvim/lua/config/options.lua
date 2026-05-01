@@ -1,10 +1,10 @@
 vim.opt.number = true
 vim.opt.relativenumber = true
 
-vim.opt.mouse = 'a'
+vim.opt.mouse = "a"
 
 vim.opt.wrap = false
-vim.opt.winborder = 'rounded'
+vim.opt.winborder = "rounded"
 -- Buffer borders
 vim.opt.laststatus = 3
 
@@ -25,15 +25,22 @@ vim.opt.incsearch = true
 
 vim.opt.termguicolors = true
 
-vim.opt.signcolumn = 'yes'
+vim.opt.signcolumn = "yes"
 vim.opt.scrolloff = 8
+vim.opt.smoothscroll = true
 
-vim.opt.updatetime = 50
+vim.opt.updatetime = 30
 
 -- Spell checking
 vim.opt.spell = true
-vim.opt.spelllang = { 'en_us' }
+vim.opt.spelllang = { "en_us" }
 
 -- Background
 vim.api.nvim_set_hl(0, "Normal", { bg = "none" })
 vim.api.nvim_set_hl(0, "NormalFloat", { bg = "none" })
+
+-- "Smart" case searching
+-- If all lower case, finds all
+-- Any upper case letter makes it case sensitive
+vim.opt.ignorecase = true
+vim.opt.smartcase = true
