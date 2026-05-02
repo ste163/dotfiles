@@ -80,11 +80,6 @@
       "rev": "664e752f4a219801265cc3fc18782b457b58c1e1",
       "src": "https://github.com/folke/twilight.nvim"
     },
-    "undotree": {
-      "rev": "be23eacb2a63380bd79e207a738c728214ecc9d3",
-      "src": "https://github.com/mbbill/undotree",
-      "version": "'rel_6.1'"
-    },
     "vim-fugitive": {
       "rev": "3b753cf8c6a4dcde6edee8827d464ba9b8c4a6f0",
       "src": "https://github.com/tpope/vim-fugitive"
