@@ -1,36 +1,55 @@
-# Dotfiles 
+# Dotfiles
 
-## font
-Install the Nerd font.
+## Setup (new machine)
 
-## oh-my-zsh (.zshrc)
+Clone the repo and run the install script:
+
+```sh
+git clone git@github.com:ste163/nvim-setup.git ~/Github/dotfiles
+cd ~/Github/dotfiles
+bash ./install.sh
+```
+
+`install.sh` creates symlinks for tmux, nvim, and btop configs. Changes pulled via `git pull`
+are live immediately. Edits to `~/.tmux.conf` etc. are edits to the repo — just `git add` and push.
+
+### zsh
 
 1. Install `oh-my-zsh`
-2. Copy the contents of `.zshrc` and overwrite the values in the default `.zshrc`
+2. Add the following line to `~/.zshrc`, **after** `export ZSH=...` but **before** `source $ZSH/oh-my-zsh.sh`:
+   ```sh
+   source ~/Github/dotfiles/.zshrc.shared
+   ```
 
-## tmux 
+`.zshrc.shared` sets the theme and plugins that oh-my-zsh reads at startup. Machine-specific
+paths and secrets stay in your local `~/.zshrc` below the `source $ZSH/oh-my-zsh.sh` line
+and are never committed.
 
-Move the config file into: `~/.tmux.conf`
+## font
 
-### Mac
+Install the Nerd font from `fonts/`.
 
-1. `brew install tmux`
-2. Open the `.terminal` profile in `Terminal`
+## tmux
 
-#### Btop (Mac specific)
+```sh
+brew install tmux
+```
 
-1. `brew install btop` for system resource usage.
-2. Move the conf file to `~/.config/btop/btop.conf`
+Open `mac-profile.terminal` in Terminal.app to import the color profile.
+
+### Btop
+
+```sh
+brew install btop
+```
+
+The config is symlinked automatically by `install.sh`.
 
 ## neovim
 
 > Setup using NVIM v0.12.2, using the built-in package manager and built-in tree-sitter
 
-Move the `nvim` directory into `~/.config`:
-
-```sh
-mv nvim ~/.config/nvim
-```
+The `nvim/` directory is symlinked automatically by `install.sh`.
 
 ### Installing neovim
 
@@ -70,7 +89,7 @@ mv nvim ~/.config/nvim
     ```sh
     sudo rm -rf /opt/nvim
     ```
-2. Download `nvim-macos-arm64.tar.gz` from the [neovim releases page](https://github.com/neovim/neovim/releases)
+2. Download nvim from its repo 
 3. Extract the archive:
     ```sh
     tar xzf nvim-macos-arm64.tar.gz
