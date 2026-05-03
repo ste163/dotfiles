@@ -9,7 +9,7 @@ require('lualine').setup({
     theme = 'rose-pine',
     globalstatus = true,
     disabled_filetypes = {
-      winbar = { 'NvimTree', 'fugitive' },
+      winbar = { 'NvimTree', 'fugitive', '' }, -- '' catches terminal buffers (they have no filetype)
     },
   },
 
@@ -30,7 +30,7 @@ require('lualine').setup({
         file_status = true,
         shorting_target = 40,
         symbols = {
-          modified = '[+]',
+          modified = '',
           readonly = '[-]',
           unnamed  = '[No Name]',
         },
@@ -46,7 +46,7 @@ require('lualine').setup({
         path = 0,
         file_status = true,
         symbols = {
-          modified = '[+]',
+          modified = '',
           readonly = '[-]',
           unnamed  = '[No Name]',
         },
