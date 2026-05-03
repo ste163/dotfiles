@@ -4,35 +4,21 @@ vim.pack.add({ {
   version = 'master'
 } })
 
--- Customize the rose-pine theme so every section has a visible background.
--- lualine_a (mode) reacts to mode; all other sections use a consistent overlay bg.
-local colors = {
-  base    = '#191724',
-  overlay = '#26233a',
-  pine    = '#31748f',
-  foam    = '#9ccfd8',
-  iris    = '#c4a7e7',
-  rose    = '#ebbcba',
-  gold    = '#f6c177',
-  love    = '#eb6f92',
-  text    = '#e0def4',
-  subtle  = '#908caa',
-  muted   = '#6e6a86',
-}
+local p = require('rose-pine.palette')
 
 local theme = {
-  normal   = { a = { bg = colors.pine, fg = colors.base, gui = 'bold' } },
-  insert   = { a = { bg = colors.foam, fg = colors.base, gui = 'bold' } },
-  visual   = { a = { bg = colors.iris, fg = colors.base, gui = 'bold' } },
-  replace  = { a = { bg = colors.love, fg = colors.base, gui = 'bold' } },
-  command  = { a = { bg = colors.gold, fg = colors.base, gui = 'bold' } },
-  inactive = { a = { bg = colors.overlay, fg = colors.muted } },
+  normal   = { a = { bg = p.pine, fg = p.base, gui = 'bold' } },
+  insert   = { a = { bg = p.foam, fg = p.base, gui = 'bold' } },
+  visual   = { a = { bg = p.iris, fg = p.base, gui = 'bold' } },
+  replace  = { a = { bg = p.love, fg = p.base, gui = 'bold' } },
+  command  = { a = { bg = p.gold, fg = p.base, gui = 'bold' } },
+  inactive = { a = { bg = p.overlay, fg = p.muted } },
 }
 
 -- All non-mode sections share the same solid overlay background
 for _, mode in pairs(theme) do
-  mode.b = { bg = colors.overlay, fg = colors.text }
-  mode.c = { bg = colors.overlay, fg = colors.subtle }
+  mode.b = { bg = p.surface, fg = p.text }
+  mode.c = { bg = p.surface, fg = p.subtle }
 end
 
 require('lualine').setup({
@@ -77,7 +63,7 @@ require('lualine').setup({
           readonly = '[-]',
           unnamed  = '[No Name]',
         },
-        color = { bg = colors.pine, fg = colors.text },
+        color = { bg = p.pine, fg = p.text },
       },
     },
   },
@@ -93,7 +79,7 @@ require('lualine').setup({
           readonly = '[-]',
           unnamed  = '[No Name]',
         },
-        color = { bg = colors.overlay, fg = colors.muted },
+        color = { bg = p.surface, fg = p.muted },
       },
     },
   },
