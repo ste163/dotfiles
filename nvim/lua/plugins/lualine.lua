@@ -40,7 +40,7 @@ require('lualine').setup({
     lualine_c = { 'diagnostics' },    -- errors/warnings
     lualine_x = {},                   -- empty middle
     lualine_y = { 'filetype' },       -- language  like VS Code bottom-right
-    lualine_z = { 'location' },       -- line:col, far right
+    lualine_z = { 'progress', 'location' }, -- % through file, line:col, far right
   },
   inactive_sections = {
     lualine_a = {},
