@@ -116,3 +116,15 @@ end
 
 -- Use pcall to prevent errors if the theme hasn't loaded palette yet
 pcall(setup_blended_cursorline)
+
+-- Style the completion popup menu using the rose-pine palette.
+-- Needed because transparency = true clears Pmenu's background, making it invisible.
+local function setup_pmenu()
+  local p = require("rose-pine.palette")
+  vim.api.nvim_set_hl(0, "Pmenu",      { bg = p.surface, fg = p.text })
+  vim.api.nvim_set_hl(0, "PmenuSel",   { bg = p.overlay, fg = p.text, bold = true })
+  vim.api.nvim_set_hl(0, "PmenuSbar",  { bg = p.overlay })
+  vim.api.nvim_set_hl(0, "PmenuThumb", { bg = p.muted })
+end
+
+pcall(setup_pmenu)

@@ -83,6 +83,22 @@ The `nvim/` directory is symlinked automatically by `install.sh`.
     nvim --version
     ```
 
+### Removing a package
+
+1. Remove the plugin spec from `vim.pack.add()` in the relevant plugin file under `nvim/lua/plugins/` — otherwise it will be reinstalled on next startup.
+2. Inside Neovim, run:
+   ```
+   :lua vim.pack.del({'<plugin-name>'})
+   ```
+   The plugin name defaults to the repository name (e.g. `blink.cmp` for `Saghen/blink.cmp`).
+3. Neovim opens a confirmation buffer — run `:write` to confirm deletion or `:quit` to cancel.
+4. `nvim-pack-lock.json` is updated automatically after confirmation.
+
+**Example — removing `blink.cmp`:**
+```
+:lua vim.pack.del({'blink.cmp'})
+```
+
 #### Reinstall / upgrade
 
 1. Remove the old version:

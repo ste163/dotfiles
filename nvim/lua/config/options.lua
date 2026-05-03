@@ -44,3 +44,5 @@ vim.api.nvim_set_hl(0, "NormalFloat", { bg = "none" })
 -- Any upper case letter makes it case sensitive
 vim.opt.ignorecase = true
 vim.opt.smartcase = true
+
+vim.opt.completeopt = { "menuone", "noselect", "popup" }
