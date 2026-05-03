@@ -46,3 +46,5 @@ vim.opt.ignorecase = true
 vim.opt.smartcase = true
 
 vim.opt.completeopt = { "menuone", "noselect", "popup" }
+
+vim.opt.cmdheight = 0 -- Hide cmdline, unless active; then overrides statusline

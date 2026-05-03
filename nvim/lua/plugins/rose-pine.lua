@@ -128,3 +128,18 @@ local function setup_pmenu()
 end
 
 pcall(setup_pmenu)
+
+-- Style the cmdline area so it flows with the lualine surface background.
+-- MsgArea matches lualine's b/c section color, making the row feel like an extension
+-- of the statusline rather than a floating gap between lualine and tmux.
+local function setup_cmdline()
+  local p = require("rose-pine.palette")
+  vim.api.nvim_set_hl(0, "MsgArea",    { bg = p.surface, fg = p.text })
+  vim.api.nvim_set_hl(0, "WildMenu",   { bg = p.overlay, fg = p.text, bold = true })
+  vim.api.nvim_set_hl(0, "MoreMsg",    { fg = p.foam,  bold = true })
+  vim.api.nvim_set_hl(0, "Question",   { fg = p.gold,  bold = true })
+  vim.api.nvim_set_hl(0, "ErrorMsg",   { fg = p.love,  bold = true })
+  vim.api.nvim_set_hl(0, "WarningMsg", { fg = p.gold })
+end
+
+pcall(setup_cmdline)
