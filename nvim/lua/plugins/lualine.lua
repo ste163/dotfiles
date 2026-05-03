@@ -26,7 +26,7 @@ require('lualine').setup({
     theme = theme,
     globalstatus = true,
     disabled_filetypes = {
-      winbar = { 'NvimTree', 'fugitive', '' },
+      winbar = { 'NvimTree', 'fugitive', 'DiffviewFiles', 'DiffviewFileHistory', '' },
     },
     -- Flat separators everywhere except the mode pill (lualine_a keeps its block style
     -- via the theme; section_separators controls the arrows between sections)
