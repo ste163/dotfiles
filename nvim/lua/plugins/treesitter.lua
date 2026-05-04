@@ -74,7 +74,7 @@ vim.api.nvim_create_autocmd('FileType', {
 -- Multi sub-parser extra fields are the same as single entries:
 --   queries_rel     — path inside tmp_dir to copy queries from (default: 'queries')
 --   queries_prepend — line prepended to highlights.scm
-local parsers = {
+local parsers     = {
   { lang = 'html',       repo = 'https://github.com/tree-sitter/tree-sitter-html' },
   { lang = 'json',       repo = 'https://github.com/tree-sitter/tree-sitter-json' },
   { lang = 'javascript', repo = 'https://github.com/tree-sitter/tree-sitter-javascript' },
@@ -89,13 +89,13 @@ local parsers = {
       {
         lang            = 'typescript',
         subdir          = 'typescript',
-        queries_rel     = 'queries',              -- root of repo
+        queries_rel     = 'queries', -- root of repo
         queries_prepend = '; inherits: (javascript)',
       },
       {
         lang            = 'tsx',
         subdir          = 'tsx',
-        queries_rel     = 'queries',              -- same shared queries, compiled for tsx grammar
+        queries_rel     = 'queries', -- same shared queries, compiled for tsx grammar
         queries_prepend = '; inherits: (javascript)',
       },
     },
@@ -109,7 +109,7 @@ local parsers = {
 -- Both directories live under site/ which is in neovim's runtimepath by default.
 local parser_dir  = vim.fn.stdpath('data') .. '/site/parser'
 local queries_dir = vim.fn.stdpath('data') .. '/site/queries'
-vim.fn.mkdir(parser_dir,  'p')
+vim.fn.mkdir(parser_dir, 'p')
 vim.fn.mkdir(queries_dir, 'p')
 
 -- Returns a flat list of all individual {lang, repo, subdir} specs for tab-completion / status.
@@ -151,7 +151,7 @@ end
 -- This is the skip condition for installs (avoids redundant clones on every startup).
 local function is_ready(lang)
   return vim.treesitter.language.add(lang) == true
-    and vim.fn.isdirectory(queries_dir .. '/' .. lang) ~= 0
+      and vim.fn.isdirectory(queries_dir .. '/' .. lang) ~= 0
 end
 
 -- Build one parser .so from an already-cloned tmp_dir.
@@ -185,7 +185,9 @@ local function install_entry(entry, force)
     if not force then
       local all_ready = true
       for _, p in ipairs(entry.multi) do
-        if not is_ready(p.lang) then all_ready = false; break end
+        if not is_ready(p.lang) then
+          all_ready = false; break
+        end
       end
       if all_ready then return end
     end
