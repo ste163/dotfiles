@@ -1,6 +1,7 @@
 ZSH_THEME="refined"
 plugins=(git vi-mode)
 
+alias vi='nvim'
 alias vim='nvim'
 export VISUAL=nvim
 export EDITOR=nvim
