@@ -103,6 +103,7 @@ local parsers = {
   { lang = 'css',        repo = 'https://github.com/tree-sitter/tree-sitter-css' },
   { lang = 'yaml',       repo = 'https://github.com/tree-sitter-grammars/tree-sitter-yaml' },
   { lang = 'dockerfile', repo = 'https://github.com/camdencheek/tree-sitter-dockerfile' },
+  { lang = 'python',     repo = 'https://github.com/tree-sitter/tree-sitter-python' },
 }
 
 -- Both directories live under site/ which is in neovim's runtimepath by default.
