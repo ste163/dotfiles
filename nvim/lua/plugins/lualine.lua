@@ -35,11 +35,11 @@ require('lualine').setup({
   },
 
   sections = {
-    lualine_a = { 'mode' },           -- changes color per mode (normal/insert/visual)
-    lualine_b = { 'branch', 'diff' }, -- git info, flat solid color
-    lualine_c = { 'diagnostics' },    -- errors/warnings
-    lualine_x = {},                   -- empty middle
-    lualine_y = { 'filetype' },       -- language  like VS Code bottom-right
+    lualine_a = { 'mode' },                 -- changes color per mode (normal/insert/visual)
+    lualine_b = { 'branch', 'diff' },       -- git info, flat solid color
+    lualine_c = { 'diagnostics' },          -- errors/warnings
+    lualine_x = {},                         -- empty middle
+    lualine_y = { 'filetype' },             -- language  like VS Code bottom-right
     lualine_z = { 'progress', 'location' }, -- % through file, line:col, far right
   },
   inactive_sections = {
@@ -63,7 +63,7 @@ require('lualine').setup({
           readonly = '[-]',
           unnamed  = '[No Name]',
         },
-        color = { bg = p.pine, fg = p.text },
+        color = { bg = p.pine, fg = p.base },
       },
     },
   },
