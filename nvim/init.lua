@@ -17,7 +17,8 @@ require("plugins.gitsigns")
 require("plugins.mini-animate")
 
 require("plugins.rose-pine") -- must be before lualine so its palette is available
-require("plugins.lualine")  -- uses rose-pine.palette, so rose-pine must load first
+require("plugins.markview") -- needs to be below theme
+require("plugins.lualine") -- uses rose-pine.palette, so rose-pine must load first
 require("plugins.which-key") -- should be last to load all keybinds
 
 local fugitive_group = vim.api.nvim_create_augroup("FugitiveTerminalFix", { clear = true })
