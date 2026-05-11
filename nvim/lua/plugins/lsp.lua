@@ -33,6 +33,7 @@ require("mason-lspconfig").setup({
 		"tailwindcss",
 		"lua_ls",
 		"eslint",
+		"jsonls",
 		"pyright",
 	},
 })
