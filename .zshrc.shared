@@ -1,6 +1,11 @@
 ZSH_THEME="refined"
 plugins=(git vi-mode)
 
+# Auto-start tmux if not already inside a tmux session
+if [[ -z "$TMUX" ]]; then
+  exec tmux new-session -A -s main
+fi
+
 alias vi='nvim'
 alias vim='nvim'
 export VISUAL=nvim

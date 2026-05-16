@@ -3,28 +3,47 @@ set -e
 
 DOTFILES="$(cd "$(dirname "$0")" && pwd)"
 
+# --- Config table (source, destination, type: file|dir) ---
+SRCS=(
+  "$DOTFILES/.tmux.conf"
+  "$DOTFILES/btop.conf"
+  "$DOTFILES/nvim"
+  "$DOTFILES/ghostty"
+)
+DSTS=(
+  "$HOME/.tmux.conf"
+  "$HOME/.config/btop/btop.conf"
+  "$HOME/.config/nvim"
+  "$HOME/.config/ghostty"
+)
+TYPES=(
+  "file"
+  "file"
+  "dir"
+  "dir"
+)
+
+link_entry() {
+  local src="$1" dst="$2" type="$3"
+  mkdir -p "$(dirname "$dst")"
+  if [ "$type" = "dir" ]; then
+    if [ -L "$dst" ]; then
+      rm "$dst"
+    elif [ -e "$dst" ]; then
+      echo "Error: $dst already exists and is not a symlink. Back it up and remove it first."
+      exit 1
+    fi
+  fi
+  ln -sf "$src" "$dst"
+  echo "Linked: $dst"
+}
+
 echo "Dotfiles: $DOTFILES"
 echo ""
 
-# .tmux.conf
-ln -sf "$DOTFILES/.tmux.conf" "$HOME/.tmux.conf"
-echo "Linked: ~/.tmux.conf"
-
-# nvim — remove only if it's already a symlink, otherwise error
-mkdir -p "$HOME/.config"
-if [ -L "$HOME/.config/nvim" ]; then
-  rm "$HOME/.config/nvim"
-elif [ -e "$HOME/.config/nvim" ]; then
-  echo "Error: ~/.config/nvim already exists and is not a symlink. Back it up and remove it first."
-  exit 1
-fi
-ln -sf "$DOTFILES/nvim" "$HOME/.config/nvim"
-echo "Linked: ~/.config/nvim"
-
-# btop
-mkdir -p "$HOME/.config/btop"
-ln -sf "$DOTFILES/btop.conf" "$HOME/.config/btop/btop.conf"
-echo "Linked: ~/.config/btop/btop.conf"
+for i in "${!SRCS[@]}"; do
+  link_entry "${SRCS[$i]}" "${DSTS[$i]}" "${TYPES[$i]}"
+done
 
 echo ""
 echo "Action required: add the following line to your ~/.zshrc (if not already present)."
@@ -64,9 +83,9 @@ check_link() {
   fi
 }
 
-check_link "$HOME/.tmux.conf"             "$DOTFILES/.tmux.conf"
-check_link "$HOME/.config/nvim"           "$DOTFILES/nvim"
-check_link "$HOME/.config/btop/btop.conf" "$DOTFILES/btop.conf"
+for i in "${!DSTS[@]}"; do
+  check_link "${DSTS[$i]}" "${SRCS[$i]}"
+done
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then

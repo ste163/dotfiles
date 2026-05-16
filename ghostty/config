@@ -1,0 +1,15 @@
+shell-integration = "zsh"
+
+font-family = "BitstromWera Nerd Font Mono"
+font-size = 16
+
+background-blur-radius = 20
+background-opacity = 0.9
+
+theme = Rose Pine Moon
+
+window-padding-y = 10,10
+window-padding-x = 10,10
+
+macos-titlebar-style = "hidden"
+macos-titlebar-proxy-icon = "hidden"
