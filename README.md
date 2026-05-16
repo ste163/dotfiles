@@ -40,19 +40,15 @@ brew install ghostty
 brew install tmux
 ```
 
-### Btop
+## Btop
 
 ```sh
 brew install btop
 ```
 
-The config is symlinked automatically by `install.sh`.
-
 ## neovim
 
 > Setup using NVIM v0.12.2, using the built-in package manager and built-in tree-sitter
-
-The `nvim/` directory is symlinked automatically by `install.sh`.
 
 ### Installing neovim
 
