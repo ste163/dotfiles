@@ -10,7 +10,7 @@ cd ~/Github/dotfiles
 bash ./install.sh
 ```
 
-`install.sh` creates symlinks for tmux, nvim, and btop configs. Changes pulled via `git pull`
+`install.sh` creates symlinks for all configs. Changes pulled via `git pull`
 are live immediately. Edits to `~/.tmux.conf` etc. are edits to the repo — just `git add` and push.
 
 ### zsh
@@ -29,13 +29,16 @@ and are never committed.
 
 Install the Nerd font from `fonts/`.
 
+## ghostty
+```sh
+brew install ghostty
+```
+
 ## tmux
 
 ```sh
 brew install tmux
 ```
-
-Open `mac-profile.terminal` in Terminal.app to import the color profile.
 
 ### Btop
 
