@@ -69,15 +69,11 @@ brew install btop
     ```sh
     sudo mv nvim-macos-arm64 /opt/nvim
     ```
-5. Add nvim to your PATH in `~/.zshrc`:
-    ```sh
-    export PATH="$PATH:/opt/nvim/bin"
-    ```
-6. Reload your shell:
+5. Reload your shell:
     ```sh
     source ~/.zshrc
     ```
-7. Verify:
+6. Verify:
     ```sh
     nvim --version
     ```
