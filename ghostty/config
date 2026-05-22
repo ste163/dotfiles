@@ -8,8 +8,12 @@ background-opacity = 0.9
 
 theme = Rose Pine Moon
 
-window-padding-y = 10,10
+window-padding-y = 0,10
 window-padding-x = 10,10
 
-macos-titlebar-style = "hidden"
+# Cleanup window header, but keeps top bar for window movement
+title = " " 
+window-subtitle = false
+shell-integration-features = no-title
+macos-titlebar-style = "transparent"
 macos-titlebar-proxy-icon = "hidden"
