@@ -46,6 +46,19 @@ brew install tmux
 brew install btop
 ```
 
+## pi
+
+Install from https://pi.dev/
+
+After running `install.sh` (and after `pi` is installed), manually run:
+
+```sh
+pi update --all
+```
+
+to install packages referenced in `settings.json` (package installs live under
+`~/.pi/agent/npm` and `git`, which aren't synced across machines).
+
 ## neovim
 
 > Setup using NVIM v0.12.2, using the built-in package manager and built-in tree-sitter
@@ -96,25 +109,9 @@ brew install btop
 
 #### Reinstall / upgrade
 
-1. Remove the old version:
+Remove the old version:
     ```sh
     sudo rm -rf /opt/nvim
     ```
-2. Download nvim from its repo 
-3. Extract the archive:
-    ```sh
-    tar xzf nvim-macos-arm64.tar.gz
-    ```
-4. Clear the macOS quarantine flag:
-    ```sh
-    xattr -cr nvim-macos-arm64
-    ```
-5. Move to `/opt/`:
-    ```sh
-    sudo mv nvim-macos-arm64 /opt/nvim
-    ```
-6. Verify:
-    ```sh
-    nvim --version
-    ```
 
+Follow fresh install steps

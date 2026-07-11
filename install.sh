@@ -45,6 +45,30 @@ for i in "${!SRCS[@]}"; do
   link_entry "${SRCS[$i]}" "${DSTS[$i]}" "${TYPES[$i]}"
 done
 
+# --- Pi config (item-level symlinks, never the whole ~/.pi/agent dir) ---
+# ~/.pi/agent also holds secrets/state (auth.json, models.json, sessions/, npm/)
+# that must never be synced via a public dotfiles repo, so only known config
+# items are linked individually.
+PI_SRC="$DOTFILES/.pi"
+PI_DST="$HOME/.pi/agent"
+mkdir -p "$PI_DST"
+
+PI_ITEMS=(
+  "settings.json:file"
+  "keybindings.json:file"
+  "APPEND_SYSTEM.md:file"
+  "skills:dir"
+  "prompts:dir"
+  "themes:dir"
+  "extensions:dir"
+)
+for entry in "${PI_ITEMS[@]}"; do
+  item="${entry%%:*}"
+  type="${entry##*:}"
+  [ -e "$PI_SRC/$item" ] || continue
+  link_entry "$PI_SRC/$item" "$PI_DST/$item" "$type"
+done
+
 echo ""
 echo "Action required: add the following line to your ~/.zshrc (if not already present)."
 echo "It must come AFTER 'export ZSH=...' but BEFORE 'source \$ZSH/oh-my-zsh.sh':"
@@ -85,6 +109,12 @@ check_link() {
 
 for i in "${!DSTS[@]}"; do
   check_link "${DSTS[$i]}" "${SRCS[$i]}"
+done
+
+for entry in "${PI_ITEMS[@]}"; do
+  item="${entry%%:*}"
+  [ -e "$PI_SRC/$item" ] || continue
+  check_link "$PI_DST/$item" "$PI_SRC/$item"
 done
 
 echo ""
