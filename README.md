@@ -59,6 +59,11 @@ pi update --all
 to install packages referenced in `settings.json` (package installs live under
 `~/.pi/agent/npm` and `git`, which aren't synced across machines).
 
+### MCP
+
+The `codebase-memory-mcp` server is core to this setup. Ensure it's downloaded and able to run:
+https://deusdata.github.io/codebase-memory-mcp/
+
 ### Extensions
 
 `.pi/extensions/` is a real, tracked directory — not a symlink itself. It holds two
