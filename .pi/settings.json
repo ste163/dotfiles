@@ -10,7 +10,11 @@
     "retryDelayMs": 1000,
     "warningThreshold": 3200
   },
-  "packages": ["npm:pi-mcp-adapter"],
+  "packages": [
+    "npm:pi-mcp-adapter",
+    "npm:@gotgenes/pi-permission-system",
+    "npm:pi-lens"
+  ],
   "requestDefaults": {
     "maxTokens": 2000,
     "streaming": true,
@@ -22,10 +26,10 @@
     "monitorMemory": true,
     "tokenLimitWarning": true
   },
-  "theme": "dark",
+  "theme": "rose-pine-moon",
   "warnings": {
     "anthropicExtraUsage": false
   },
-  "defaultThinkingLevel": "medium"
+  "defaultThinkingLevel": "medium",
+  "lastChangelogVersion": "0.80.6"
 }
-
