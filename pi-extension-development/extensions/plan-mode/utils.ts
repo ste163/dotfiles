@@ -95,23 +95,19 @@ const SAFE_PATTERNS = [
   /^\s*eza\b/,
 ];
 
-export function isSafeCommand(command: string): boolean {
+export const isSafeCommand = (command: string): boolean => {
   const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
   const isSafe = SAFE_PATTERNS.some((p) => p.test(command));
   return !isDestructive && isSafe;
-}
+};
 
 // Default name offered when the user doesn't provide one for the plan file.
 export const DEFAULT_PLAN_FILE_NAME = "plan.md";
 
 // Strip any directory parts the user typed - plan file always lives in cwd.
-export function toBaseName(path: string): string {
-  return path.split(/[/\\]/).pop() ?? path;
-}
+export const toBaseName = (path: string): string => path.split(/[/\\]/).pop() ?? path;
 
-export function withMdExt(name: string): string {
-  return /\.[^./\\]+$/.test(name) ? name : `${name}.md`;
-}
+export const withMdExt = (name: string): string => (/\.[^./\\]+$/.test(name) ? name : `${name}.md`);
 
 export interface TodoItem {
   step: number;
@@ -119,68 +115,62 @@ export interface TodoItem {
   completed: boolean;
 }
 
-export function cleanStepText(text: string): string {
-  let cleaned = text
-    .replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1") // Remove bold/italic
-    .replace(/`([^`]+)`/g, "$1") // Remove code
-    .replace(
-      /^(Use|Run|Execute|Create|Write|Read|Check|Verify|Update|Modify|Add|Remove|Delete|Install)\s+(the\s+)?/i,
-      "",
-    )
+const stripLeadingVerb = (text: string): string =>
+  text.replace(
+    /^(Use|Run|Execute|Create|Write|Read|Check|Verify|Update|Modify|Add|Remove|Delete|Install)\s+(the\s+)?/i,
+    "",
+  );
+
+const capitalize = (text: string): string =>
+  text.length > 0 ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+
+const truncate = (text: string, max: number): string =>
+  text.length > max ? `${text.slice(0, max - 3)}...` : text;
+
+export const cleanStepText = (text: string): string => {
+  const stripped = stripLeadingVerb(
+    text
+      .replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1") // Remove bold/italic
+      .replace(/`([^`]+)`/g, "$1"), // Remove code
+  )
     .replace(/\s+/g, " ")
     .trim();
 
-  if (cleaned.length > 0) {
-    cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  }
-  if (cleaned.length > 50) {
-    cleaned = `${cleaned.slice(0, 47)}...`;
-  }
-  return cleaned;
-}
+  return truncate(capitalize(stripped), 50);
+};
 
-export function extractTodoItems(message: string): TodoItem[] {
-  const items: TodoItem[] = [];
+const isPlanStepCandidate = (text: string): boolean =>
+  text.length > 5 && !text.startsWith("`") && !text.startsWith("/") && !text.startsWith("-");
+
+export const extractTodoItems = (message: string): TodoItem[] => {
   const headerMatch = message.match(/\*{0,2}Plan:\*{0,2}\s*\n/i);
-  if (!headerMatch) return items;
+  if (!headerMatch) return [];
 
   const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
   const numberedPattern = /^\s*(\d+)[.)]\s+\*{0,2}([^*\n]+)/gm;
 
-  for (const match of planSection.matchAll(numberedPattern)) {
+  return Array.from(planSection.matchAll(numberedPattern)).reduce<TodoItem[]>((items, match) => {
     const text = (match[2] ?? "")
       .trim()
       .replace(/\*{1,2}$/, "")
       .trim();
-    if (
-      text.length > 5 &&
-      !text.startsWith("`") &&
-      !text.startsWith("/") &&
-      !text.startsWith("-")
-    ) {
-      const cleaned = cleanStepText(text);
-      if (cleaned.length > 3) {
-        items.push({ step: items.length + 1, text: cleaned, completed: false });
-      }
-    }
-  }
-  return items;
-}
+    if (!isPlanStepCandidate(text)) return items;
 
-export function extractDoneSteps(message: string): number[] {
-  const steps: number[] = [];
-  for (const match of message.matchAll(/\[DONE:(\d+)\]/gi)) {
-    const step = Number(match[1]);
-    if (Number.isFinite(step)) steps.push(step);
-  }
-  return steps;
-}
+    const cleaned = cleanStepText(text);
+    if (cleaned.length > 3) items.push({ step: items.length + 1, text: cleaned, completed: false });
+    return items;
+  }, []);
+};
 
-export function markCompletedSteps(text: string, items: TodoItem[]): number {
-  const doneSteps = extractDoneSteps(text);
-  for (const step of doneSteps) {
+export const extractDoneSteps = (message: string): number[] =>
+  Array.from(message.matchAll(/\[DONE:(\d+)\]/gi), (match) => Number(match[1])).filter((step) =>
+    Number.isFinite(step),
+  );
+
+export const markCompletedSteps = (text: string, items: TodoItem[]): number =>
+  extractDoneSteps(text).reduce((completedCount, step) => {
     const item = items.find((t) => t.step === step);
-    if (item) item.completed = true;
-  }
-  return doneSteps.length;
-}
+    if (!item) return completedCount;
+    item.completed = true;
+    return completedCount + 1;
+  }, 0);

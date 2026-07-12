@@ -58,9 +58,8 @@ const defaultDeps: PlanModeDeps = {
   cwd: () => process.cwd(),
 };
 
-function planFileExists(name: string, deps: PlanModeDeps): boolean {
-  return deps.existsSync(join(deps.cwd(), name));
-}
+const planFileExists = (name: string, deps: PlanModeDeps): boolean =>
+  deps.existsSync(join(deps.cwd(), name));
 
 interface PlanModeState {
   enabled: boolean;
@@ -70,37 +69,36 @@ interface PlanModeState {
 }
 
 // Type guard for assistant messages
-function isAssistantMessage(m: AgentMessage): m is AssistantMessage {
-  return m.role === "assistant" && Array.isArray(m.content);
-}
+const isAssistantMessage = (m: AgentMessage): m is AssistantMessage =>
+  m.role === "assistant" && Array.isArray(m.content);
 
 // Extract text content from an assistant message
-function getTextContent(message: AssistantMessage): string {
-  return message.content
+const getTextContent = (message: AssistantMessage): string =>
+  message.content
     .filter((block): block is TextContent => block.type === "text")
     .map((block) => block.text)
     .join("\n");
-}
 
-export function createPlanModeExtension(pi: ExtensionAPI, deps: PlanModeDeps = defaultDeps): void {
+export const createPlanModeExtension = (
+  pi: ExtensionAPI,
+  deps: PlanModeDeps = defaultDeps,
+): void => {
   let planModeEnabled = false;
   let executionMode = false;
   let todoItems: TodoItem[] = [];
   let planFileName: string | undefined;
 
-  function isPlanFile(path: string): boolean {
-    if (!planFileName) return false;
-    return toBaseName(path).toLowerCase() === planFileName.toLowerCase();
-  }
+  const isPlanFile = (path: string): boolean =>
+    planFileName !== undefined && toBaseName(path).toLowerCase() === planFileName.toLowerCase();
 
   // Prompt for a plan file name, re-prompting while the name collides with
   // an existing file in cwd. Returns undefined if the user cancels. Recursive
   // rather than a loop - each attempt genuinely depends on the previous one's
   // answer, so there is nothing to run concurrently here.
-  async function promptForPlanFileName(
+  const promptForPlanFileName = async (
     ctx: ExtensionContext,
     previousAttempt = "",
-  ): Promise<string | undefined> {
+  ): Promise<string | undefined> => {
     const promptText =
       previousAttempt.length > 0
         ? `"${previousAttempt}" already exists in this directory. Choose another plan file name (blank = ${DEFAULT_PLAN_FILE_NAME}):`
@@ -114,7 +112,7 @@ export function createPlanModeExtension(pi: ExtensionAPI, deps: PlanModeDeps = d
 
     if (!planFileExists(candidate, deps)) return candidate;
     return promptForPlanFileName(ctx, candidate);
-  }
+  };
 
   pi.registerFlag("plan", {
     description: "Start in plan mode (read-only exploration, named plan file writable)",
@@ -122,7 +120,7 @@ export function createPlanModeExtension(pi: ExtensionAPI, deps: PlanModeDeps = d
     default: false,
   });
 
-  function updateStatus(ctx: ExtensionContext): void {
+  const updateStatus = (ctx: ExtensionContext): void => {
     // Footer status
     if (executionMode && todoItems.length > 0) {
       const completed = todoItems.filter((t) => t.completed).length;
@@ -151,18 +149,18 @@ export function createPlanModeExtension(pi: ExtensionAPI, deps: PlanModeDeps = d
     } else {
       ctx.ui.setWidget("plan-todos", undefined);
     }
-  }
+  };
 
-  function persistState(): void {
+  const persistState = (): void => {
     pi.appendEntry("plan-mode", {
       enabled: planModeEnabled,
       todos: todoItems,
       executing: executionMode,
       planFileName,
     });
-  }
+  };
 
-  async function togglePlanMode(ctx: ExtensionContext): Promise<void> {
+  const togglePlanMode = async (ctx: ExtensionContext): Promise<void> => {
     if (!planModeEnabled) {
       // Turning on: reuse the existing plan file if it's still set and
       // present on disk, otherwise ask for a (unique) name.
@@ -184,7 +182,7 @@ export function createPlanModeExtension(pi: ExtensionAPI, deps: PlanModeDeps = d
     }
     updateStatus(ctx);
     persistState();
-  }
+  };
 
   pi.registerCommand("plan", {
     description: "Toggle plan mode (read-only exploration, named plan file writable)",
@@ -439,28 +437,16 @@ After completing a step, include a [DONE:n] tag in your response.`;
     const isResume = planModeEntry !== undefined;
     if (isResume && executionMode && todoItems.length > 0) {
       // Find the index of the last plan-mode-execute entry (marks when current execution started)
-      let executeIndex = -1;
-      for (let i = entries.length - 1; i >= 0; i--) {
-        const entry = entries[i] as { type: string; customType?: string };
-        if (entry.customType === "plan-mode-execute") {
-          executeIndex = i;
-          break;
-        }
-      }
+      const executeIndex = entries.findLastIndex(
+        (entry) => (entry as { customType?: string }).customType === "plan-mode-execute",
+      );
 
       // Only scan messages after the execute marker
-      const messages: AssistantMessage[] = [];
-      for (let i = executeIndex + 1; i < entries.length; i++) {
-        const entry = entries[i];
-        if (!entry) continue;
-        if (
-          entry.type === "message" &&
-          "message" in entry &&
-          isAssistantMessage(entry.message as AgentMessage)
-        ) {
-          messages.push(entry.message as AssistantMessage);
-        }
-      }
+      const messages: AssistantMessage[] = entries
+        .slice(executeIndex + 1)
+        .filter((entry) => entry !== undefined && entry.type === "message" && "message" in entry)
+        .map((entry) => (entry as unknown as { message: AgentMessage }).message)
+        .filter(isAssistantMessage);
       const allText = messages.map(getTextContent).join("\n");
       markCompletedSteps(allText, todoItems);
     }
@@ -483,8 +469,10 @@ After completing a step, include a [DONE:n] tag in your response.`;
 
     updateStatus(ctx);
   });
-}
+};
 
-export default function planModeExtension(pi: ExtensionAPI): void {
+const planModeExtension = (pi: ExtensionAPI): void => {
   createPlanModeExtension(pi);
-}
+};
+
+export default planModeExtension;
