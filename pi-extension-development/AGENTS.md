@@ -12,6 +12,30 @@ anywhere — the files you edit in `extensions/` are the exact files pi loads
 through the symlinks in `.pi/extensions/`. "Verification" (typecheck, lint,
 format, test) is the only thing that happens before code is considered done.
 
+## Locating pi's installed docs/source (portable, not machine-specific)
+
+Don't hardcode an fnm/nvm version path (e.g.
+`~/.local/share/fnm/node-versions/vX.Y.Z/installation/...`) when you need pi's
+bundled docs or the `pi-tui`/`pi-coding-agent` source — that path differs per
+machine and per Node version manager (fnm, nvm, volta, system node, etc.).
+Resolve it dynamically instead:
+
+```sh
+# Global @earendil-works/pi-coding-agent docs (README.md, docs/*.md, examples/)
+npm root -g   # → prints the active global node_modules dir
+"$(npm root -g)/@earendil-works/pi-coding-agent/docs"
+
+# Or resolve the package.json directly (works regardless of manager):
+node -e "console.log(require.resolve('@earendil-works/pi-coding-agent/package.json'))"
+node -e "console.log(require.resolve('@earendil-works/pi-tui/package.json'))"
+```
+
+Note: `pi-extension-development/node_modules/@earendil-works/pi-tui` is also
+vendored locally (for typecheck/import resolution) — prefer that local copy
+when already inside this directory; fall back to the `npm root -g` /
+`require.resolve` lookup above for the docs, which only ship in the global
+package install.
+
 ## Hard structural rule
 
 Every extension is a **directory** directly under `extensions/`, containing:

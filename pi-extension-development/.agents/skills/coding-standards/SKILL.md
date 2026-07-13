@@ -11,6 +11,10 @@ description: TypeScript coding standards and testing conventions for this projec
   `const foo = (...) => {}` everywhere a real function isn't required.
 - **Follow SRP.** Each function/module does one thing; split instead of
   growing a function to cover multiple responsibilities.
+- **Never use default exports** — with one exception: `extensions/<name>/index.ts` must `export default` the extension factory function, since pi's extension loader requires it (see pi's own `docs/extensions.md`: "Entry point (exports default function)"). Every other file/export in the project uses named exports only.
+- **Only export what's actually used elsewhere.** If a function/const isn't
+  imported by another file, it shouldn't be exported — keep it module-
+  private. Don't export "just in case."
 - **Prefer ternaries** over if/else for simple conditional expressions, and
   **prefer built-ins** (`.map`, `.reduce`, `.filter`, etc.) over manual loops.
 - **Use `reduce` over `Set`** for dedup/aggregation-style logic.
