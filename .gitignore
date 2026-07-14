@@ -1,0 +1,10 @@
+# Never commit secrets or machine-specific pi state.
+# These should never exist under .pi/ in this repo, but this is belt-and-suspenders
+# protection since .pi/agent is a public dotfiles-managed directory.
+.pi/auth.json
+.pi/models.json
+.pi/trust.json
+.pi/sessions/
+.pi/npm/
+.pi/git/
+**logs

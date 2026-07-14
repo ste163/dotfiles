@@ -46,6 +46,51 @@ brew install tmux
 brew install btop
 ```
 
+## pi
+
+Install from https://pi.dev/
+
+After running `install.sh` (and after `pi` is installed), manually run:
+
+```sh
+pi update --all
+```
+
+to install packages referenced in `settings.json` (package installs live under
+`~/.pi/agent/npm` and `git`, which aren't synced across machines).
+
+### MCP
+
+The `codebase-memory-mcp` server is core to this setup. Ensure it's downloaded and able to run:
+https://deusdata.github.io/codebase-memory-mcp/
+
+### Extensions
+
+`.pi/extensions/` is a real, tracked directory — not a symlink itself. It holds two
+kinds of content side by side:
+
+- **Package-managed state**, e.g. `pi-permission-system/` (installed via the `packages`
+  entry in `settings.json`). Its `config.json` is tracked/shared on purpose (that's the
+  point of this repo); its `logs/` are gitignored.
+- **Our own hand-written extensions**, whose actual source lives in
+  [`pi-extension-development/`](pi-extension-development/) — a standalone TypeScript
+  project with its own `package.json`, `tsconfig.json`, linting, formatting, and tests.
+  There is no build step: pi loads extensions via `jiti`, which runs `.ts` files
+  directly at load time, so the exact files being typechecked/linted/tested are the
+  exact same files pi loads — nothing is compiled or copied.
+
+`install.sh` bridges the two: for every directory under
+`pi-extension-development/extensions/`, it creates a matching symlink inside
+`.pi/extensions/` (e.g. `.pi/extensions/plan-mode -> pi-extension-development/extensions/plan-mode`).
+The existing whole-dir symlink (`.pi/extensions -> ~/.pi/agent/extensions`) then carries
+both the package-managed state and our dev extensions through to pi automatically.
+
+**Adding a new extension:** create it under `pi-extension-development/extensions/<name>/`
+(see that directory's own README/AGENTS.md for the required structure and workflow), then
+rerun `install.sh` once so its symlink gets created in `.pi/extensions/`. After that,
+editing the extension's source is live immediately (same as everything else symlinked
+by this repo) — only brand-new extension directories need `install.sh` rerun.
+
 ## neovim
 
 > Setup using NVIM v0.12.2, using the built-in package manager and built-in tree-sitter
@@ -96,25 +141,9 @@ brew install btop
 
 #### Reinstall / upgrade
 
-1. Remove the old version:
+Remove the old version:
     ```sh
     sudo rm -rf /opt/nvim
     ```
-2. Download nvim from its repo 
-3. Extract the archive:
-    ```sh
-    tar xzf nvim-macos-arm64.tar.gz
-    ```
-4. Clear the macOS quarantine flag:
-    ```sh
-    xattr -cr nvim-macos-arm64
-    ```
-5. Move to `/opt/`:
-    ```sh
-    sudo mv nvim-macos-arm64 /opt/nvim
-    ```
-6. Verify:
-    ```sh
-    nvim --version
-    ```
 
+Follow fresh install steps

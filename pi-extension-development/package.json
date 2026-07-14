@@ -1,0 +1,21 @@
+{
+  "name": "pi-extension-development",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"node_modules/**\" --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 \"**/*.spec.ts\"",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check ."
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.80.6",
+    "@earendil-works/pi-ai": "0.80.6",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-tui": "0.80.6",
+    "oxfmt": "0.58.0",
+    "oxlint": "1.73.0",
+    "typescript": "7.0.2"
+  }
+}
