@@ -13,7 +13,8 @@
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:@gotgenes/pi-permission-system",
-    "npm:pi-lens"
+    "npm:pi-lens",
+    "npm:@ollama/pi-web-search"
   ],
   "requestDefaults": {
     "maxTokens": 2000,
