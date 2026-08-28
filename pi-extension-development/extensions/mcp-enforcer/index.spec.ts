@@ -319,6 +319,51 @@ test("blocks an allowlisted command piped, chained, or process-substituted into 
   assert.equal(processSub.block, true);
 });
 
+test("allows grep-family searches that name only docs or config files (Phase 3)", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(["/virtual/repo/.git"], "connected");
+  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+
+  // The calls are independent of each other, so they run concurrently.
+  const results = await Promise.all(
+    [
+      "grep -F 'x' README.md",
+      "rg 'foo\\|bar' *.md",
+      'grep "two words" docs/file.md',
+      "ack pattern notes.txt",
+      "ag term config.json",
+      "rg -i pattern README.md docs/notes.txt",
+    ].map((command) => callHandler(pi, "tool_call", { toolName: "bash", input: { command } })),
+  );
+  assert.ok(results.every((result) => result === undefined));
+});
+
+test("blocks searches with code targets, no targets, or compound forms (Phase 3)", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(["/virtual/repo/.git"], "connected");
+  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+
+  const commands = [
+    "grep foo src/*.ts",
+    "rg -il caveman",
+    "rg",
+    "rg foo docs/",
+    "grep foo README.md | head",
+    "grep foo -r . --include='*.md'",
+    "git grep foo -- '*.md'",
+  ];
+
+  // The calls are independent of each other, so they run concurrently.
+  const results = await Promise.all(
+    commands.map((command) =>
+      callHandler(pi, "tool_call", { toolName: "bash", input: { command } }),
+    ),
+  );
+  commands.forEach((command, index) => {
+    assert.equal((results[index] as { block: boolean }).block, true, command);
+  });
+});
+
 test("allows tool calls that are not bash", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);

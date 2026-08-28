@@ -25,6 +25,10 @@
  * No live status API exists in pi 0.80.6, so the state is last-observed.
  * The prose escape hatch is gone: MCP down means a hard block with
  * state-specific instructions.
+ *
+ * v2 Phase 3: a grep-family command (`grep`, `rg`, `ack`, `ag`) that names
+ * its files, all docs or config, is allowed. The pattern does not matter —
+ * regex over markdown is still not code search.
  */
 
 import { existsSync } from "node:fs";
@@ -149,6 +153,54 @@ const isAllowlisted = (command: string): boolean => {
 };
 
 // ---------------------------------------------------------------------------
+// Docs-target exemption (Phase 3)
+// ---------------------------------------------------------------------------
+
+// Docs/config file extensions: grep over named files with these extensions
+// is not code search. This list is the only knob in the exemption.
+const DOCS_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".md",
+  ".txt",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".conf",
+  ".ini",
+]);
+
+// The content-search commands the exemption covers.
+const SEARCH_FAMILY: ReadonlySet<string> = new Set(["grep", "rg", "ack", "ag"]);
+
+// Replace every quoted segment with one placeholder token, so a pattern with
+// spaces stays one token and operators inside quotes do not disqualify.
+const stripQuoted = (command: string): string =>
+  command.replace(/'[^']*'/g, "QUOTED").replace(/"[^"]*"/g, "QUOTED");
+
+const fileExtension = (token: string): string => {
+  const dot = token.lastIndexOf(".");
+  return dot === -1 ? "" : token.slice(dot);
+};
+
+/**
+ * True for one simple grep-family command whose named targets are all
+ * docs/config files (Phase 3). The pattern itself does not matter.
+ */
+const isDocsOnlySearch = (command: string): boolean => {
+  const stripped = stripQuoted(command);
+  if (DISQUALIFIERS.some((d) => stripped.includes(d))) return false;
+  const tokens = stripped.trim().split(/\s+/);
+  const leading = tokens[0] as string;
+  if (!SEARCH_FAMILY.has(leading)) return false;
+  const args = tokens.slice(1).filter((token) => !token.startsWith("-"));
+  const pattern = args[0];
+  if (pattern === undefined) return false;
+  const targets = args.slice(1);
+  if (targets.length === 0) return false; // cwd-wide scan, no named targets
+  return targets.every((target) => DOCS_EXTENSIONS.has(fileExtension(target)));
+};
+
+// ---------------------------------------------------------------------------
 // Block messages (Phase 2)
 // ---------------------------------------------------------------------------
 
@@ -193,6 +245,8 @@ export const createMcpEnforcerExtension = (
     if (isAllowlisted(command)) return; // one simple allowlisted command, pass
 
     if (!looksLikeCodeSearch(command)) return;
+
+    if (isDocsOnlySearch(command)) return; // grep-family over named docs files, allow
 
     if (!findGitRoot(deps.cwd(), deps)) return; // not in a git repo, allow
 

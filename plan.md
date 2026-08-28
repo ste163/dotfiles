@@ -1,7 +1,7 @@
 # mcp-enforcer v2 — plan
 
-Status: Phases 0 through 2 complete. Phases 3 and 4 remain, then 6. Phase 5
-is the optional upstream request. All decision points are resolved. This file
+Status: Phases 0 through 3 complete. Phase 4 remains, then 6. Phase 5 is the
+optional upstream request. All decision points are resolved. This file
 supersedes the v1 plan (the previous content of this file). Read the v1
 design in git history.
 
@@ -37,27 +37,29 @@ The v1 enforcer moved the agent onto MCP tooling, but it had these faults:
    server, or reports failure and stops that line of work.
 2. Allowlist from the start. `bash ls` is always OK.
 3. Block intent, not command names.
-4. Literal-search exemption. A plain pattern plus non-code targets is legal
-   grep.
+4. Docs-target exemption. A grep-family command over named docs/config files
+   is legal grep, any pattern.
 5. Real tool names and params in every message.
 6. The enforcer is a signal. The permission system is the control.
 
-## Current state (after Phase 2)
+## Current state (after Phase 3)
 
 - Source: `pi-extension-development/extensions/mcp-enforcer/index.ts`,
   symlinked from `.pi/extensions/mcp-enforcer` by `install.sh`.
-- Phases 0 through 2 shipped the factory, the allowlist, and the status-aware
-  block flow: `createMcpEnforcerExtension(pi, deps)` with `McpEnforcerDeps` =
+- Phases 0 through 3 shipped the factory, the allowlist, the status-aware
+  block flow, and the docs-target exemption:
+  `createMcpEnforcerExtension(pi, deps)` with `McpEnforcerDeps` =
   `{ existsSync, cwd, getMcpStatus, recordMcpStatusSnapshot }` (the
   PlanModeDeps pattern) and a colocated `index.spec.ts`. Enforcer files sit
   at 100% coverage. The live reload after Phase 0 closed the duplicate-module
   question from `extension-setup.md`: the extension loads and blocks
   through the symlink. The `ls` flag pattern is gone. The allowlist (`ls`,
-  `pwd`, `echo`, `readlink`, `stat`) passes one simple command only. The block
-  flow consults the status provider: redirect message when connected,
-  connect-first when not connected, stop message when unreachable. The
-  status tracks the adapter's snapshots on the shared event bus and starts
-  "not connected". The prose escape hatch is gone.
+  `pwd`, `echo`, `readlink`, `stat`) passes one simple command only. A
+  grep-family command over named docs/config files passes too (Phase 3).
+  The block flow consults the status provider: redirect message when
+  connected, connect-first when not connected, stop message when
+  unreachable. The status tracks the adapter's snapshots on the shared
+  event bus and starts "not connected". The prose escape hatch is gone.
 - `npm test` is green on all assertions. The coverage threshold stays red only
   on the plan-mode debt (see "Out of scope").
 - Before the fix, both sessions started with the server disconnected (0/1).
@@ -150,35 +152,46 @@ Test rows to lock:
      user, stop that line of work, do not fall back to bash. The state is
      last-observed, not a live query.
 
-## Phase 3 — Literal-search exemption
+## Phase 3 — Docs-target exemption (complete)
 
-Keep blocking: `grep`, `rg`, `ack`, `ag`, `git grep`, `find -name`, `find
--type`, `cat` with a glob or a pipe.
+Rule: a grep-family command (`grep`, `rg`, `ack`, `ag`) that names its
+files, where every named file is docs or config, is allowed. The pattern
+itself does not matter — regex over markdown is still not code search.
+Simplified from the first draft after review: the literal/metacharacter test
+is gone. It bought nothing and was the most fragile part.
 
-New classifier for content-search commands. Parse out the pattern, the flags,
-and the target globs:
-
-- Literal test: `-F` or `--fixed-strings` flag, or the pattern contains no
-  regex metacharacters (`| ( ) [ ] { } * + ? ^ $ \`).
-- Non-code targets: every explicit target resolves to docs or config
-  extensions (`.md .txt .json .yaml .yml .toml .conf .ini`).
-- Both true: allow. This matches the MCP server's own guidance.
-- Either false: block.
-- No explicit targets (a cwd-wide scan such as `rg -il foo`): treat as code
-  search and block.
-- Only explicit path arguments count as targets. `--include` filters and rg
-  `-t` or `-g` filters do not count in this version. Conservative by design.
-  Revisit only if real sessions hit it.
+- Docs/config extensions: `.md .txt .json .yaml .yml .toml .conf .ini`.
+  This list is the only knob.
+- Target extraction: replace every quoted segment with one placeholder
+  token, so a pattern with spaces stays one token and operators inside
+  quotes do not disqualify. Drop flags. The first remaining argument is the
+  pattern, the rest are the targets. No shell parsing beyond that.
+- A compound command (pipe, chain, substitution) never gets the exemption.
+  The exemption uses the same disqualifier set as the allowlist.
+- No target arguments (a cwd-wide scan such as `rg -il foo`) blocks. A
+  target without an extension, such as a directory, blocks too.
+- `git grep`, `find -name`, `find -type`, and `cat` with a glob or a pipe
+  stay blocked. The exemption covers only the grep family.
+- `--include` filters and rg `-t`/`-g` filters do not count as targets.
 
 Test cases to lock:
 
 | Command | Result | Reason |
 | --- | --- | --- |
-| `grep -F 'x' README.md` | Allow | Literal, docs target |
-| `rg 'foo\|bar' *.md` | Block | Regex pattern |
-| `grep foo src/*.ts` | Block | Code targets |
+| `grep -F 'x' README.md` | Allow | Docs target |
+| `rg 'foo\|bar' *.md` | Allow | Docs target — regex over docs is fine |
+| `grep "two words" docs/file.md` | Allow | A quoted pattern stays one token |
+| `grep foo src/*.ts` | Block | Code target |
 | `rg -il caveman` | Block | Cwd-wide scan |
-| `grep -F foo -r . --include='*.md'` | Block | An include filter is not a target |
+| `rg` | Block | No pattern, no targets |
+| `rg foo docs/` | Block | A directory target has no extension |
+| `grep foo README.md \| head` | Block | A pipe ends the exemption |
+| `grep foo -r . --include='*.md'` | Block | An include filter is not a target |
+| `git grep foo -- '*.md'` | Block | Not the grep family |
+
+Extension points, all data changes: add extensions, add tools to the family,
+adjust target parsing if a real command shape misbehaves. If regex over docs
+ever bites, re-adding an `-F` requirement is a small follow-up.
 
 ## Phase 4 — Message rewrite plus three-surface sync
 
@@ -192,7 +205,7 @@ New block message (connected state), draft:
 3. Project name?     mcp({ tool: "codebase-memory-mcp_list_projects" })
 4. Search:           mcp({ tool: "codebase-memory-mcp_search_code", args: { pattern: "...", project: "<name>", mode: "files" } })
 
-Literal string in docs/config? bash grep is legal for that — use -F with explicit non-code targets.
+Docs/config files? Name them and bash grep is legal for that.
 ```
 
 Name rules: the gateway form needs the `codebase-memory-mcp_` prefix on every
@@ -242,7 +255,7 @@ This phase touches no code in this repo.
      `ls pi-extension-development` specifically.
    - `grep -F x README.md`: allowed.
    - `rg` on `.ts` files: blocked.
-   - Regex pattern: blocked.
+   - `rg 'foo\|bar' *.md`: allowed (Phase 3, docs targets).
    - `ls foo | grep bar`: blocked.
    - `echo $(rg foo src)`: blocked.
    - Session start: the server auto-connects (`lifecycle: "eager"`). A grep
@@ -278,4 +291,4 @@ Phase 0, then 1, 2, 3, 4, then 6. Phase 5 is the upstream request, optional,
 and comes last. Phase 0 is the big lift. Phases 1 through 4 are small after
 the scaffold exists.
 
-Resume point after machine restart: Phase 3, step 1.
+Resume point after machine restart: Phase 4, step 1.
