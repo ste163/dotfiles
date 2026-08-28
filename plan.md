@@ -1,9 +1,8 @@
 # mcp-enforcer v2 — plan
 
-Status: Phases 0 through 4 complete. Phase 6 remains. Phase 5 is the
-optional upstream request. All decision points are resolved. This file
-supersedes the v1 plan (the previous content of this file). Read the v1
-design in git history.
+Status: Phases 0 through 4 and 6 complete. Phase 5 (the optional upstream
+request) is all that remains. This file supersedes the v1 plan (the previous
+content of this file). Read the v1 design in git history.
 
 Source: field report from the simple-english swap session, plus a second
 review session that re-tested every fault live and closed the open research
@@ -251,25 +250,30 @@ opaque-wrapper floor. This matters the day the bash catch-all is loosened.
 
 This phase touches no code in this repo.
 
-## Phase 6 — Verification
+## Phase 6 — Verification (complete)
 
-1. Run in `pi-extension-development`: `npm run typecheck`, `npm run lint`,
-   `npm test`. Assertions pass, enforcer files sit at 100%, and the repo-wide
-   threshold stays red only on the recorded plan-mode debt.
-2. Live matrix in a real session:
-   - `ls` anywhere, any flags, any path: allowed. Test `ls -la` and
-     `ls pi-extension-development` specifically.
-   - `grep -F x README.md`: allowed.
-   - `rg` on `.ts` files: blocked.
-   - `rg 'foo\|bar' *.md`: allowed (Phase 3, docs targets).
+1. Gates: `npm run typecheck`, `npm run lint`, `npm test` all clean.
+   Assertions pass, enforcer files sit at 100%, and the repo-wide threshold
+   stays red only on the recorded plan-mode debt.
+2. Live matrix, run in a real session:
+   - `ls -la` and `ls pi-extension-development`: allowed.
+   - `grep -F x README.md`: allowed, and the grep ran.
+   - `rg` on `.ts` files: blocked, with the four-step redirect message and
+     the real git root interpolated.
+   - `rg 'foo\|bar' *.md`: allowed, and the search ran.
    - `ls foo | grep bar`: blocked.
    - `echo $(rg foo src)`: blocked.
-   - Session start: the server auto-connects (`lifecycle: "eager"`). A grep
-     attempt gets the redirect message.
-   - Server forced not-connected (point the command at a missing binary):
-     connect-first message.
-   - Server down after a connect attempt: stop message.
-3. Consistency check across the three policy surfaces.
+   - Session start: the server auto-connects (`lifecycle: "eager"`).
+     Verified in three consecutive sessions.
+3. Consistency check across the three policy surfaces: done with Phase 4.
+   All three state the same rules.
+4. The connect-first and stop rows stayed unit-verified only. Killing the
+   server process does not force them live: the adapter keeps reporting
+   "connected" for a dead process until its own detection runs, so no
+   not-connected snapshot is published and the enforcer faithfully mirrors
+   the adapter. The redirect message's step-1 connect call covers the lag.
+   A true live test needs a deliberate broken-config reload (missing
+   binary), not a process kill.
 
 ## Decisions (resolved in review)
 
@@ -297,4 +301,5 @@ Phase 0, then 1, 2, 3, 4, then 6. Phase 5 is the upstream request, optional,
 and comes last. Phase 0 is the big lift. Phases 1 through 4 are small after
 the scaffold exists.
 
-Resume point after machine restart: Phase 6, step 1.
+Resume point after machine restart: all code phases done. Only the optional
+Phase 5 upstream request remains.
