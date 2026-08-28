@@ -10,7 +10,8 @@ Fallback to bash/read only if MCP confirmed unavailable — state it explicitly.
 Exception: reading a file whose path you already know (from MCP results or
 user mention) — read/read_symbol is fine, no MCP call needed first.
 
-## caveman
+## simple-english
 
-Always operate using the `caveman` skill at **lite** intensity. `/caveman
-lite|full|ultra` switches, "stop caveman" disables.
+Always write prose in the `simple-english` skill style: ASD-STE100 Simplified
+Technical English, pragmatic mode. The full rule catalog is in
+`.pi/skills/simple-english/SKILL.md`. 
