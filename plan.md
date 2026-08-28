@@ -1,7 +1,7 @@
 # mcp-enforcer v2 — plan
 
-Status: Phase 0 complete. Phases 1 through 4, then 6 remain. Phase 5 is the
-optional upstream request. All decision points are resolved. This file
+Status: Phases 0 through 2 complete. Phases 3 and 4 remain, then 6. Phase 5
+is the optional upstream request. All decision points are resolved. This file
 supersedes the v1 plan (the previous content of this file). Read the v1
 design in git history.
 
@@ -42,22 +42,30 @@ The v1 enforcer moved the agent onto MCP tooling, but it had these faults:
 5. Real tool names and params in every message.
 6. The enforcer is a signal. The permission system is the control.
 
-## Current state (after Phase 0)
+## Current state (after Phase 2)
 
 - Source: `pi-extension-development/extensions/mcp-enforcer/index.ts`,
   symlinked from `.pi/extensions/mcp-enforcer` by `install.sh`.
-- Phase 0 shipped the factory: `createMcpEnforcerExtension(pi, deps)` with
-  `McpEnforcerDeps` = `{ existsSync, cwd, getMcpStatus }` (the PlanModeDeps
-  pattern) and a colocated `index.spec.ts`. Enforcer files sit at 100%
-  coverage. The behavior is still v1: regex blocklist, escape-hatch message,
-  reminder injection. `getMcpStatus` is scaffold, defaulting to
-  "not_connected" until Phase 2 wires it in.
+- Phases 0 through 2 shipped the factory, the allowlist, and the status-aware
+  block flow: `createMcpEnforcerExtension(pi, deps)` with `McpEnforcerDeps` =
+  `{ existsSync, cwd, getMcpStatus, recordMcpStatusSnapshot }` (the
+  PlanModeDeps pattern) and a colocated `index.spec.ts`. Enforcer files sit
+  at 100% coverage. The live reload after Phase 0 closed the duplicate-module
+  question from `extension-setup.md`: the extension loads and blocks
+  through the symlink. The `ls` flag pattern is gone. The allowlist (`ls`,
+  `pwd`, `echo`, `readlink`, `stat`) passes one simple command only. The block
+  flow consults the status provider: redirect message when connected,
+  connect-first when not connected, stop message when unreachable. The
+  status tracks the adapter's snapshots on the shared event bus and starts
+  "not connected". The prose escape hatch is gone.
 - `npm test` is green on all assertions. The coverage threshold stays red only
   on the plan-mode debt (see "Out of scope").
-- `mcp.json` says `lifecycle: "always"`, but both sessions started with the
-  server disconnected (0/1). The status check must read live state, never the
-  config. "Not connected" is the normal state at session start, so the
-  connect-first message is the primary path, not an edge case.
+- Before the fix, both sessions started with the server disconnected (0/1).
+  `mcp.json` said `lifecycle: "always"`, a value the adapter does not know,
+  so the server started lazy. `mcp.json` now sets `lifecycle: "eager"`: the
+  adapter connects eager servers at startup and keeps them alive. Verify at
+  the next session start that the server auto-connects. The status check
+  still reads live state, never the config.
 - `ExtensionAPI` at 0.80.6 exposes no MCP status surface. No method, no event,
   no bus topic. Verified against the full `types.d.ts`. Status detection must
   come from tool results or a process check.
@@ -87,16 +95,17 @@ The v1 enforcer moved the agent onto MCP tooling, but it had these faults:
 
 Do this phase first. Every later phase needs the test scaffold.
 
-## Phase 1 — Allowlist plus ls removal
+## Phase 1 — Allowlist plus ls removal (complete)
 
 1. Delete the `ls` pattern from `CODE_SEARCH_PATTERNS`. There is exactly one.
 2. Add an `ALLOWED` check that runs before the block patterns. If the leading
    command is in the list, pass immediately.
-3. Substitution guard: a command that contains `$(` or a backtick never passes
-   the allowlist. The block patterns run on the whole string. Otherwise
-   `echo $(rg -n foo src)` would bypass through an allowlisted leading command.
-   The permission system already descends into substitutions. The enforcer,
-   as a signal, must not be weaker than the control it points at.
+3. Substitution and operator guard: a command that contains `$(`, a backtick,
+   `|`, `&`, `;`, a newline, `<(`, or `>(` never passes the allowlist. The
+   block patterns run on the whole string. Otherwise `echo $(rg -n foo src)`
+   would bypass through an allowlisted leading command. The permission system
+   already descends into substitutions and process substitution. The
+   enforcer, as a signal, must not be weaker than the control it points at.
 4. The allowlist covers only the leading command. `ls foo | grep bar` still
    hits the grep pattern and blocks.
 
@@ -110,29 +119,36 @@ Test rows to lock:
 | `ls pi-extension-development` | Allow | Dashed paths must not trip the old flag pattern |
 | `echo $(rg -n foo src)` | Block | Substitution guard |
 | `ls foo \| grep bar` | Block | Pipe reaches the grep pattern |
+| `ls && rg foo` | Block | A chain operator ends the allowlist pass |
+| `ls <(rg foo)` | Block | Process substitution ends the allowlist pass |
 
-## Phase 2 — MCP-down hard block
+## Phase 2 — MCP-down hard block (complete)
 
-1. Remove the prose escape hatch from the message.
+1. Removed the prose escape hatch from the redirect message.
 2. The injected status provider answers one of: connected, not connected, or
    unreachable. Tests inject all three.
-3. Default implementation, because no status API exists (see Current state):
+3. Shipped implementation, better than the draft in this file: the mcp
+   adapter publishes versioned status snapshots on pi's shared event bus
+   (channel `pi-mcp-adapter/status/v1`, see `pi-mcp-adapter/types.ts`). The
+   enforcer subscribes on that channel and records every snapshot. No text
+   parsing of tool results, no `pgrep` process check.
    - Default state: "not connected". The first blocked call gets the
      connect-first message.
-   - Refinement: listen on `tool_execution_end` for `mcp` tool calls. Parse
-     the status lines (`MCP: 0/1 servers`) and the connect errors. Update the
-     state from what you parse.
-   - Optional live check: `pi.exec("pgrep", ["-f", "codebase-memory-mcp"])`.
-     No process means no connection.
+   - Snapshot mapping: our server with status "connected" maps to connected;
+     "failed" maps to unreachable; every other status ("cached",
+     "needs-auth", "not-connected", "disabled") and malformed snapshots map
+     to not connected.
+   - The adapter publishes on startup, connect, connect failure, reconnect,
+     backoff expiry, and idle shutdown, so the state self-heals.
    - A connect call on a connected server is a no-op, so the default state is
      safe to send first.
 4. Flow when a command looks like code search:
-   - Connected: block with the redirect message (current behavior).
-   - Not connected: block with a connect-first message. Include the exact call
-     `mcp({ connect: "codebase-memory-mcp" })`.
-   - Unreachable after a connect attempt: block with a stop message. The
-     message says: inform the user, do not fall back to bash. Name the state
-     as last-observed, because no live API exists.
+   - Connected: block with the redirect message.
+   - Not connected: block with a connect-first message. The message names the
+     exact call `mcp({ connect: "codebase-memory-mcp" })`.
+   - Unreachable: block with a stop message. The message says: inform the
+     user, stop that line of work, do not fall back to bash. The state is
+     last-observed, not a live query.
 
 ## Phase 3 — Literal-search exemption
 
@@ -229,8 +245,10 @@ This phase touches no code in this repo.
    - Regex pattern: blocked.
    - `ls foo | grep bar`: blocked.
    - `echo $(rg foo src)`: blocked.
-   - Server disconnected at session start (the normal state): connect-first
-     message.
+   - Session start: the server auto-connects (`lifecycle: "eager"`). A grep
+     attempt gets the redirect message.
+   - Server forced not-connected (point the command at a missing binary):
+     connect-first message.
    - Server down after a connect attempt: stop message.
 3. Consistency check across the three policy surfaces.
 
@@ -245,9 +263,11 @@ This phase touches no code in this repo.
 
 ## Out of scope (file as separate bugs)
 
-- `lifecycle: "always"` in `mcp.json` did not connect the server at session
-  start in either session. Config and runtime disagree. Investigate before you
-  trust any always-on assumption.
+- `lifecycle: "always"` in `mcp.json` never connected the server at session
+  start. Root cause: the adapter accepts only `keep-alive`, `lazy`,
+  `lazy-keep-alive`, and `eager`; an unknown value falls through to `lazy`.
+  Fixed: `mcp.json` now sets `"lifecycle": "eager"`. The next session start
+  must confirm that the server auto-connects.
 - plan-mode coverage debt (~82% lines). The repo-wide `npm test` threshold
   stays red until this is paid. `extension-setup.md` already records it as
   deferred work. It blocks the repo-wide gate, not the enforcer work.
@@ -258,4 +278,4 @@ Phase 0, then 1, 2, 3, 4, then 6. Phase 5 is the upstream request, optional,
 and comes last. Phase 0 is the big lift. Phases 1 through 4 are small after
 the scaffold exists.
 
-Resume point after machine restart: Phase 1, step 1.
+Resume point after machine restart: Phase 3, step 1.
