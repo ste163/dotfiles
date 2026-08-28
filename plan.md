@@ -1,8 +1,9 @@
 # mcp-enforcer v2 — plan
 
-Status: approved design. All decision points are resolved. Not yet
-implemented. This file supersedes the v1 plan (the previous content of this
-file). Read the v1 design in git history.
+Status: Phase 0 complete. Phases 1 through 4, then 6 remain. Phase 5 is the
+optional upstream request. All decision points are resolved. This file
+supersedes the v1 plan (the previous content of this file). Read the v1
+design in git history.
 
 Source: field report from the simple-english swap session, plus a second
 review session that re-tested every fault live and closed the open research
@@ -41,15 +42,18 @@ The v1 enforcer moved the agent onto MCP tooling, but it had these faults:
 5. Real tool names and params in every message.
 6. The enforcer is a signal. The permission system is the control.
 
-## Current state (verified, second session)
+## Current state (after Phase 0)
 
-- Source: `.pi/extensions/mcp-enforcer/index.ts`. About 100 lines, regex
-  blocklist, no tests, no dependency injection.
-- It violates the repo rules in `extension-setup.md`: every extension lives in
-  `pi-extension-development/extensions/<name>/` with `index.ts` plus a
-  colocated `*.spec.ts`, and passes the 100% coverage gate.
-- The v1 plan (git history of this file) designed a factory with injected
-  dependencies. The shipped code has none of it.
+- Source: `pi-extension-development/extensions/mcp-enforcer/index.ts`,
+  symlinked from `.pi/extensions/mcp-enforcer` by `install.sh`.
+- Phase 0 shipped the factory: `createMcpEnforcerExtension(pi, deps)` with
+  `McpEnforcerDeps` = `{ existsSync, cwd, getMcpStatus }` (the PlanModeDeps
+  pattern) and a colocated `index.spec.ts`. Enforcer files sit at 100%
+  coverage. The behavior is still v1: regex blocklist, escape-hatch message,
+  reminder injection. `getMcpStatus` is scaffold, defaulting to
+  "not_connected" until Phase 2 wires it in.
+- `npm test` is green on all assertions. The coverage threshold stays red only
+  on the plan-mode debt (see "Out of scope").
 - `mcp.json` says `lifecycle: "always"`, but both sessions started with the
   server disconnected (0/1). The status check must read live state, never the
   config. "Not connected" is the normal state at session start, so the
@@ -60,14 +64,11 @@ The v1 enforcer moved the agent onto MCP tooling, but it had these faults:
 - The MCP gateway requires server-prefixed tool names:
   `codebase-memory-mcp_search_code`, not `search_code`. Bare names fail. The
   proxy tool `mcp__codebase_memory_mcp` also works and takes bare names.
-- `npm test` in `pi-extension-development` fails today for two reasons: one
-  wrong test expectation and plan-mode coverage debt. See Phase 0 and
-  "Out of scope".
 - The `pi-permission-system` config sets `bash: { "*": "ask" }`. Every bash
   command asks for approval. The matcher also evaluates commands nested inside
   `$(...)`, backticks, and subshells.
 
-## Phase 0 — Relocate to the dev project
+## Phase 0 — Relocate to the dev project (complete)
 
 1. Fix the one-line spec bug in `plan-mode/utils.spec.ts`. The test "ignores
    DONE markers with no matching step" expects `count === 1`. The correct
@@ -257,4 +258,4 @@ Phase 0, then 1, 2, 3, 4, then 6. Phase 5 is the upstream request, optional,
 and comes last. Phase 0 is the big lift. Phases 1 through 4 are small after
 the scaffold exists.
 
-Resume point after machine restart: Phase 0, step 1.
+Resume point after machine restart: Phase 1, step 1.
