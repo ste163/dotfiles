@@ -187,12 +187,12 @@ test("blocks bash code-search with the redirect message when connected", async (
 
   assert.equal(result.block, true);
   assert.ok(result.reason.includes("MCP FIRST"));
-  // Phase 4: real gateway tool names, and the git root is interpolated.
+  // Real gateway tool names, and the git root is interpolated into step 2.
   assert.ok(result.reason.includes("codebase-memory-mcp_search_code"));
   assert.ok(result.reason.includes('mcp({ connect: "codebase-memory-mcp" })'));
   assert.ok(result.reason.includes('repo_path: "/virtual/repo", mode: "fast"'));
   assert.ok(!result.reason.includes("codebase_memory_mcp_"));
-  // Phase 2 removed the v1 prose escape hatch.
+  // No prose escape hatch anywhere.
   assert.ok(!result.reason.includes("genuinely unavailable"));
 });
 
@@ -254,7 +254,7 @@ test("allows bash commands that are neither allowlisted nor code search", async 
   assert.equal(result, undefined);
 });
 
-test("allows every allowlisted leading command (Phase 1)", async () => {
+test("allows every allowlisted leading command", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
   createMcpEnforcerExtension(pi as unknown as Pi, deps);
@@ -268,7 +268,7 @@ test("allows every allowlisted leading command (Phase 1)", async () => {
   assert.ok(results.every((result) => result === undefined));
 });
 
-test("allows ls with flags and with dashed paths (Phase 1)", async () => {
+test("allows ls with flags and with dashed paths", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
   createMcpEnforcerExtension(pi as unknown as Pi, deps);
@@ -286,7 +286,7 @@ test("allows ls with flags and with dashed paths (Phase 1)", async () => {
   assert.equal(dashed, undefined);
 });
 
-test("blocks allowlisted leading commands that nest a search in substitution (Phase 1)", async () => {
+test("blocks allowlisted leading commands that nest a search in substitution", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
   createMcpEnforcerExtension(pi as unknown as Pi, deps);
@@ -299,7 +299,7 @@ test("blocks allowlisted leading commands that nest a search in substitution (Ph
   assert.equal(result.block, true);
 });
 
-test("blocks an allowlisted command piped, chained, or process-substituted into search (Phase 1)", async () => {
+test("blocks an allowlisted command piped, chained, or process-substituted into search", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
   createMcpEnforcerExtension(pi as unknown as Pi, deps);
@@ -323,7 +323,7 @@ test("blocks an allowlisted command piped, chained, or process-substituted into 
   assert.equal(processSub.block, true);
 });
 
-test("allows grep-family searches that name only docs or config files (Phase 3)", async () => {
+test("allows grep-family searches that name only docs or config files", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"], "connected");
   createMcpEnforcerExtension(pi as unknown as Pi, deps);
@@ -342,7 +342,7 @@ test("allows grep-family searches that name only docs or config files (Phase 3)"
   assert.ok(results.every((result) => result === undefined));
 });
 
-test("blocks searches with code targets, no targets, or compound forms (Phase 3)", async () => {
+test("blocks searches with code targets, no targets, or compound forms", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"], "connected");
   createMcpEnforcerExtension(pi as unknown as Pi, deps);
@@ -403,7 +403,7 @@ test("prepends the MCP reminder when inside a git repo", async () => {
 
   assert.ok(result.systemPrompt.startsWith("🔴 MCP FIRST"));
   assert.ok(result.systemPrompt.endsWith("BASE PROMPT"));
-  // Phase 4: the reminder names the real gateway tool and the docs exemption.
+  // The reminder names the real gateway tool and the docs exemption.
   assert.ok(result.systemPrompt.includes("codebase-memory-mcp_search_code"));
   assert.ok(result.systemPrompt.includes("bash grep is legal"));
 });

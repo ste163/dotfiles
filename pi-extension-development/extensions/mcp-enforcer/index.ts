@@ -1,38 +1,29 @@
 /**
- * mcp-enforcer — blocks grep/rg/find/ls/cat code-search in git repos.
+ * mcp-enforcer — blocks bash code search in git repos and redirects the
+ * agent to codebase-memory-mcp.
  *
  * The system-prompt rule tells the agent to use codebase-memory-mcp instead
  * of grep/bash for code search. This extension enforces that rule by
  * intercepting bash tool calls that look like code search and blocking them
- * with a redirect message.
+ * with a status-aware message.
+ *
+ * What passes:
+ * - One simple allowlisted command (`ls`, `pwd`, `echo`, `readlink`,
+ *   `stat`). Substitution, pipes, and chains disqualify the pass.
+ * - One simple grep-family command (`grep`, `rg`, `ack`, `ag`) whose named
+ *   targets are all docs/config files.
+ *
+ * Everything else that looks like code search blocks. The message depends on
+ * the MCP server's status: redirect with the exact calls (connected),
+ * connect-first (not connected), or stop and report (unreachable). The
+ * status provider starts "not connected" and tracks the snapshots the mcp
+ * adapter pushes on pi's shared event bus (`pi-mcp-adapter/status/v1`).
+ *
+ * Every filesystem and MCP-state access comes through injected deps (the
+ * PlanModeDeps pattern from plan-mode), so tests run fully in memory.
  *
  * Also injects a short MCP-first reminder at the top of the system prompt
  * every turn to fight context decay in long sessions.
- *
- * v2 Phase 0 (see plan.md at the repo root): the extension moved into
- * pi-extension-development and now follows the PlanModeDeps pattern from
- * plan-mode — every filesystem and MCP-state access comes through injected
- * deps, so tests run fully in memory.
- *
- * v2 Phase 1: an allowlist of leading commands (`ls`, `pwd`, `echo`,
- * `readlink`, `stat`) passes before the block patterns run. The allowlist
- * covers one simple command only — substitution, pipes, and chains fall
- * through to the block patterns. The `ls` flag pattern is gone.
- *
- * v2 Phase 2: the block flow consults the MCP server's status. The status
- * provider starts "not connected" and tracks the snapshots that the mcp
- * adapter pushes on pi's shared event bus (`pi-mcp-adapter/status/v1`).
- * No live status API exists in pi 0.80.6, so the state is last-observed.
- * The prose escape hatch is gone: MCP down means a hard block with
- * state-specific instructions.
- *
- * v2 Phase 3: a grep-family command (`grep`, `rg`, `ack`, `ag`) that names
- * its files, all docs or config, is allowed. The pattern does not matter —
- * regex over markdown is still not code search.
- *
- * v2 Phase 4: every message uses the real gateway tool names
- * (`codebase-memory-mcp_*`), the redirect message interpolates the git
- * root, and the reminder matches APPEND_SYSTEM.md.
  */
 
 import { existsSync } from "node:fs";
@@ -62,7 +53,7 @@ const MCP_STATUS_EVENT = "pi-mcp-adapter/status/v1";
 // The only MCP server the enforcer redirects to.
 const SERVER_NAME = "codebase-memory-mcp";
 
-/** Map an adapter status snapshot onto the enforcer's tri-state (Phase 2). */
+/** Map an adapter status snapshot onto the enforcer's tri-state. */
 const statusFromSnapshot = (snapshot: unknown): McpStatus => {
   if (typeof snapshot !== "object" || snapshot === null) return "not_connected";
   const servers = (snapshot as { servers?: unknown }).servers;
@@ -137,7 +128,7 @@ const looksLikeCodeSearch = (command: string): boolean =>
   CODE_SEARCH_PATTERNS.some((p) => p.test(command));
 
 // ---------------------------------------------------------------------------
-// Allowlist (Phase 1)
+// Allowlist
 // ---------------------------------------------------------------------------
 
 // Leading commands that always pass, before any block pattern runs.
@@ -149,7 +140,7 @@ const ALLOWED_COMMANDS: ReadonlySet<string> = new Set(["ls", "pwd", "echo", "rea
 // this one. The block patterns run on the whole string instead.
 const DISQUALIFIERS: readonly string[] = ["$(", "`", "|", "&", ";", "\n", "<(", ">("];
 
-/** True when the whole command is one simple allowlisted command (Phase 1). */
+/** True when the whole command is one simple allowlisted command. */
 const isAllowlisted = (command: string): boolean => {
   if (DISQUALIFIERS.some((d) => command.includes(d))) return false;
   const leading = command.trim().split(/\s+/)[0] as string;
@@ -157,7 +148,7 @@ const isAllowlisted = (command: string): boolean => {
 };
 
 // ---------------------------------------------------------------------------
-// Docs-target exemption (Phase 3)
+// Docs-target exemption
 // ---------------------------------------------------------------------------
 
 // Docs/config file extensions: grep over named files with these extensions
@@ -188,7 +179,7 @@ const fileExtension = (token: string): string => {
 
 /**
  * True for one simple grep-family command whose named targets are all
- * docs/config files (Phase 3). The pattern itself does not matter.
+ * docs/config files. The pattern itself does not matter.
  */
 const isDocsOnlySearch = (command: string): boolean => {
   const stripped = stripQuoted(command);
@@ -205,10 +196,10 @@ const isDocsOnlySearch = (command: string): boolean => {
 };
 
 // ---------------------------------------------------------------------------
-// Block messages (Phases 2 and 4)
+// Block messages
 // ---------------------------------------------------------------------------
 
-/** The connected-state block message: a cheat sheet with the real calls (Phase 4). */
+/** The connected-state block message: a cheat sheet with the real calls. */
 const redirectMessage = (gitRoot: string): string =>
   `🔴 MCP FIRST — code search blocked.\n\n` +
   `1. Not connected?    mcp({ connect: "codebase-memory-mcp" })\n` +
@@ -237,12 +228,12 @@ export const createMcpEnforcerExtension = (
   pi: ExtensionAPI,
   deps: McpEnforcerDeps = defaultDeps,
 ): void => {
-  // --- Tier 2b: track the MCP server's status from the adapter's event bus ---
+  // --- Track the MCP server's status from the adapter's event bus ---
   pi.events.on(MCP_STATUS_EVENT, (snapshot) => {
     deps.recordMcpStatusSnapshot(snapshot);
   });
 
-  // --- Tier 2: hard-intercept grep/bash code-search ---
+  // --- Hard-intercept bash code search ---
   pi.on("tool_call", (event) => {
     if (!isToolCallEventType("bash", event)) return;
 
@@ -267,7 +258,7 @@ export const createMcpEnforcerExtension = (
     return { block: true, reason: redirectMessage(gitRoot) };
   });
 
-  // --- Tier 1c: pre-turn MCP reminder (fights context decay) ---
+  // --- Pre-turn MCP reminder (fights context decay) ---
   pi.on("before_agent_start", (event) => {
     if (!findGitRoot(deps.cwd(), deps)) return; // not in a git repo, no reminder needed
 
