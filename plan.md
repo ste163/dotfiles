@@ -1,6 +1,6 @@
 # mcp-enforcer v2 — plan
 
-Status: Phases 0 through 3 complete. Phase 4 remains, then 6. Phase 5 is the
+Status: Phases 0 through 4 complete. Phase 6 remains. Phase 5 is the
 optional upstream request. All decision points are resolved. This file
 supersedes the v1 plan (the previous content of this file). Read the v1
 design in git history.
@@ -42,12 +42,12 @@ The v1 enforcer moved the agent onto MCP tooling, but it had these faults:
 5. Real tool names and params in every message.
 6. The enforcer is a signal. The permission system is the control.
 
-## Current state (after Phase 3)
+## Current state (after Phase 4)
 
 - Source: `pi-extension-development/extensions/mcp-enforcer/index.ts`,
   symlinked from `.pi/extensions/mcp-enforcer` by `install.sh`.
-- Phases 0 through 3 shipped the factory, the allowlist, the status-aware
-  block flow, and the docs-target exemption:
+- Phases 0 through 4 shipped the factory, the allowlist, the status-aware
+  block flow, the docs-target exemption, and the message rewrite:
   `createMcpEnforcerExtension(pi, deps)` with `McpEnforcerDeps` =
   `{ existsSync, cwd, getMcpStatus, recordMcpStatusSnapshot }` (the
   PlanModeDeps pattern) and a colocated `index.spec.ts`. Enforcer files sit
@@ -60,6 +60,9 @@ The v1 enforcer moved the agent onto MCP tooling, but it had these faults:
   connected, connect-first when not connected, stop message when
   unreachable. The status tracks the adapter's snapshots on the shared
   event bus and starts "not connected". The prose escape hatch is gone.
+  Phase 4 rewrote every surface — block messages, reminder,
+  APPEND_SYSTEM.md — with the real gateway tool names and the git root
+  interpolated.
 - `npm test` is green on all assertions. The coverage threshold stays red only
   on the plan-mode debt (see "Out of scope").
 - Before the fix, both sessions started with the server disconnected (0/1).
@@ -193,9 +196,9 @@ Extension points, all data changes: add extensions, add tools to the family,
 adjust target parsing if a real command shape misbehaves. If regex over docs
 ever bites, re-adding an `-F` requirement is a small follow-up.
 
-## Phase 4 — Message rewrite plus three-surface sync
+## Phase 4 — Message rewrite plus three-surface sync (complete)
 
-New block message (connected state), draft:
+New block message (connected state), as shipped:
 
 ```text
 🔴 MCP FIRST — code search blocked.
@@ -213,6 +216,9 @@ tool name. The proxy tool `mcp__codebase_memory_mcp` takes bare names and
 works too. The message uses the gateway form only, so the agent learns one
 path. Step 3 exists because the project name derives from the repo path (for
 this repo, `Users-sam-Github-dotfiles`) and is not guessable.
+
+Shipped as drafted, plus two improvements: the message interpolates the real
+git root into step 2, and the spec locks out every underscored tool name.
 
 Then sync three policy surfaces so they state the same rules:
 
@@ -291,4 +297,4 @@ Phase 0, then 1, 2, 3, 4, then 6. Phase 5 is the upstream request, optional,
 and comes last. Phase 0 is the big lift. Phases 1 through 4 are small after
 the scaffold exists.
 
-Resume point after machine restart: Phase 4, step 1.
+Resume point after machine restart: Phase 6, step 1.

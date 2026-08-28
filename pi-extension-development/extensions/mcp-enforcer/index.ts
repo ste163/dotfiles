@@ -29,6 +29,10 @@
  * v2 Phase 3: a grep-family command (`grep`, `rg`, `ack`, `ag`) that names
  * its files, all docs or config, is allowed. The pattern does not matter —
  * regex over markdown is still not code search.
+ *
+ * v2 Phase 4: every message uses the real gateway tool names
+ * (`codebase-memory-mcp_*`), the redirect message interpolates the git
+ * root, and the reminder matches APPEND_SYSTEM.md.
  */
 
 import { existsSync } from "node:fs";
@@ -201,15 +205,17 @@ const isDocsOnlySearch = (command: string): boolean => {
 };
 
 // ---------------------------------------------------------------------------
-// Block messages (Phase 2)
+// Block messages (Phases 2 and 4)
 // ---------------------------------------------------------------------------
 
-const REDIRECT_MESSAGE =
-  `🔴 MCP FIRST — grep/rg/find/ls/cat for code search blocked.\n\n` +
-  `Use these instead:\n` +
-  `  codebase_memory_mcp_search_code  — grep-like pattern search\n` +
-  `  codebase_memory_mcp_search_graph — definitions, classes, routes\n` +
-  `  codebase_memory_mcp_get_code_snippet — read a symbol's source`;
+/** The connected-state block message: a cheat sheet with the real calls (Phase 4). */
+const redirectMessage = (gitRoot: string): string =>
+  `🔴 MCP FIRST — code search blocked.\n\n` +
+  `1. Not connected?    mcp({ connect: "codebase-memory-mcp" })\n` +
+  `2. First time here?  mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "${gitRoot}", mode: "fast" } })\n` +
+  `3. Project name?     mcp({ tool: "codebase-memory-mcp_list_projects" })\n` +
+  `4. Search:          mcp({ tool: "codebase-memory-mcp_search_code", args: { pattern: "...", project: "<name>", mode: "files" } })\n\n` +
+  `Docs/config files? Name them and bash grep is legal for that.`;
 
 const CONNECT_FIRST_MESSAGE =
   `🔴 MCP FIRST — code search blocked. The codebase-memory-mcp server is not connected.\n\n` +
@@ -248,7 +254,8 @@ export const createMcpEnforcerExtension = (
 
     if (isDocsOnlySearch(command)) return; // grep-family over named docs files, allow
 
-    if (!findGitRoot(deps.cwd(), deps)) return; // not in a git repo, allow
+    const gitRoot = findGitRoot(deps.cwd(), deps);
+    if (!gitRoot) return; // not in a git repo, allow
 
     const status = deps.getMcpStatus();
     if (status === "unreachable") {
@@ -257,7 +264,7 @@ export const createMcpEnforcerExtension = (
     if (status === "not_connected") {
       return { block: true, reason: CONNECT_FIRST_MESSAGE };
     }
-    return { block: true, reason: REDIRECT_MESSAGE };
+    return { block: true, reason: redirectMessage(gitRoot) };
   });
 
   // --- Tier 1c: pre-turn MCP reminder (fights context decay) ---
@@ -265,8 +272,9 @@ export const createMcpEnforcerExtension = (
     if (!findGitRoot(deps.cwd(), deps)) return; // not in a git repo, no reminder needed
 
     const reminder =
-      `🔴 MCP FIRST: In git repos, use codebase_memory_mcp_search_code (not grep), ` +
-      `search_graph (not find/ls). mcp({}) is your first call each turn.`;
+      `🔴 MCP FIRST: In git repos, search code with mcp({ tool: "codebase-memory-mcp_search_code", ` +
+      `args: { pattern: "...", project: "<name>", mode: "files" } }) — not grep/rg. ` +
+      `Named docs/config files: bash grep is legal.`;
 
     // Prepend, not append — keeps it at top of context
     return {

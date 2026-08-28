@@ -187,7 +187,11 @@ test("blocks bash code-search with the redirect message when connected", async (
 
   assert.equal(result.block, true);
   assert.ok(result.reason.includes("MCP FIRST"));
-  assert.ok(result.reason.includes("codebase_memory_mcp_search_code"));
+  // Phase 4: real gateway tool names, and the git root is interpolated.
+  assert.ok(result.reason.includes("codebase-memory-mcp_search_code"));
+  assert.ok(result.reason.includes('mcp({ connect: "codebase-memory-mcp" })'));
+  assert.ok(result.reason.includes('repo_path: "/virtual/repo", mode: "fast"'));
+  assert.ok(!result.reason.includes("codebase_memory_mcp_"));
   // Phase 2 removed the v1 prose escape hatch.
   assert.ok(!result.reason.includes("genuinely unavailable"));
 });
@@ -399,6 +403,9 @@ test("prepends the MCP reminder when inside a git repo", async () => {
 
   assert.ok(result.systemPrompt.startsWith("🔴 MCP FIRST"));
   assert.ok(result.systemPrompt.endsWith("BASE PROMPT"));
+  // Phase 4: the reminder names the real gateway tool and the docs exemption.
+  assert.ok(result.systemPrompt.includes("codebase-memory-mcp_search_code"));
+  assert.ok(result.systemPrompt.includes("bash grep is legal"));
 });
 
 test("leaves the system prompt alone outside a git repo (walk breaks at the root)", async () => {
