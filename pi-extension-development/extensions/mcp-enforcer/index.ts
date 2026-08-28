@@ -201,7 +201,7 @@ const isDocsOnlySearch = (command: string): boolean => {
 
 /** The connected-state block message: a cheat sheet with the real calls. */
 const redirectMessage = (gitRoot: string): string =>
-  `🔴 MCP FIRST — code search blocked.\n\n` +
+  `MCP FIRST — code search blocked.\n\n` +
   `1. Not connected?    mcp({ connect: "codebase-memory-mcp" })\n` +
   `2. First time here?  mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "${gitRoot}", mode: "fast" } })\n` +
   `3. Project name?     mcp({ tool: "codebase-memory-mcp_list_projects" })\n` +
@@ -209,13 +209,13 @@ const redirectMessage = (gitRoot: string): string =>
   `Docs/config files? Name them and bash grep is legal for that.`;
 
 const CONNECT_FIRST_MESSAGE =
-  `🔴 MCP FIRST — code search blocked. The codebase-memory-mcp server is not connected.\n\n` +
+  `MCP FIRST — code search blocked. The codebase-memory-mcp server is not connected.\n\n` +
   `Connect it first, then search with the MCP tools:\n` +
   `  mcp({ connect: "codebase-memory-mcp" })\n\n` +
   `Do not fall back to bash for code search.`;
 
 const STOP_MESSAGE =
-  `🔴 MCP FIRST — code search blocked. The codebase-memory-mcp server failed to connect on the last attempt.\n\n` +
+  `MCP FIRST — code search blocked. The codebase-memory-mcp server failed to connect on the last attempt.\n\n` +
   `Inform the user that the MCP server is unreachable. Stop this line of work.\n` +
   `Do not fall back to bash for code search.\n\n` +
   `This state is last-observed from the adapter's status events, not a live query.`;
@@ -263,7 +263,7 @@ export const createMcpEnforcerExtension = (
     if (!findGitRoot(deps.cwd(), deps)) return; // not in a git repo, no reminder needed
 
     const reminder =
-      `🔴 MCP FIRST: In git repos, search code with mcp({ tool: "codebase-memory-mcp_search_code", ` +
+      `MCP FIRST: In git repos, search code with mcp({ tool: "codebase-memory-mcp_search_code", ` +
       `args: { pattern: "...", project: "<name>", mode: "files" } }) — not grep/rg. ` +
       `Named docs/config files: bash grep is legal.`;
 

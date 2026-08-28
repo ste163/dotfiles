@@ -19,6 +19,11 @@ fallback for code search.
 Exception: reading a file whose path you already know (from MCP results or
 user mention) — read/read_symbol is fine, no MCP call needed first.
 
+## No emojis in code
+
+Never put emojis in code, strings, comments, or commit messages. Use plain
+text only.
+
 ## simple-english
 
 Always write prose in the `simple-english` skill style: ASD-STE100 Simplified

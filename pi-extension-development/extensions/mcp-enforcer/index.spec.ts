@@ -401,7 +401,7 @@ test("prepends the MCP reminder when inside a git repo", async () => {
     systemPrompt: "BASE PROMPT",
   })) as { systemPrompt: string };
 
-  assert.ok(result.systemPrompt.startsWith("🔴 MCP FIRST"));
+  assert.ok(result.systemPrompt.startsWith("MCP FIRST"));
   assert.ok(result.systemPrompt.endsWith("BASE PROMPT"));
   // The reminder names the real gateway tool and the docs exemption.
   assert.ok(result.systemPrompt.includes("codebase-memory-mcp_search_code"));
