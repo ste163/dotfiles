@@ -82,6 +82,8 @@ table padding on save — cosmetic only.
 The `codebase-memory-mcp` server is core to this setup. Ensure it's downloaded and able to run:
 <https://deusdata.github.io/codebase-memory-mcp/>
 
+Update the mcp server with `codebase-memory-mcp update`
+
 ### Extensions
 
 `.pi/extensions/` is a real, tracked directory — not a symlink itself. It holds two
