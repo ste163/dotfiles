@@ -1,36 +1,18 @@
 {
-  "defaultModel": "claude-sonnet-5",
-  "defaultProvider": "github-copilot",
+  "defaultModel": "glm-5.3:cloud",
+  "defaultProvider": "ollama",
+  "defaultThinkingLevel": "max",
   "enableInstallTelemetry": false,
   "followUpMode": "one-at-a-time",
-  "memoryAware": {
-    "enabled": true,
-    "maxContextTokens": 3600,
-    "maxRetries": 1,
-    "retryDelayMs": 1000,
-    "warningThreshold": 3200
-  },
+  "lastChangelogVersion": "0.84.3",
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:@gotgenes/pi-permission-system",
     "npm:pi-lens",
     "npm:@ollama/pi-web-search"
   ],
-  "requestDefaults": {
-    "maxTokens": 2000,
-    "streaming": true,
-    "temperature": 0.7,
-    "timeout": 120000
-  },
-  "safety": {
-    "gracefulDegradation": true,
-    "monitorMemory": true,
-    "tokenLimitWarning": true
-  },
   "theme": "rose-pine-moon",
   "warnings": {
     "anthropicExtraUsage": false
-  },
-  "defaultThinkingLevel": "medium",
-  "lastChangelogVersion": "0.80.6"
+  }
 }
