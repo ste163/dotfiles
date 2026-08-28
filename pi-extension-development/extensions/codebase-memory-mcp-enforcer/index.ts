@@ -1,5 +1,5 @@
 /**
- * mcp-enforcer — blocks bash code search in git repos and redirects the
+ * codebase-memory-mcp-enforcer — blocks bash code search in git repos and redirects the
  * agent to codebase-memory-mcp.
  *
  * The system-prompt rule tells the agent to use codebase-memory-mcp instead
@@ -35,14 +35,14 @@ import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-codin
 // ---------------------------------------------------------------------------
 
 /** MCP connection state as the enforcer understands it. */
-export type McpStatus = "connected" | "not_connected" | "unreachable";
+export type CodebaseMemoryMcpStatus = "connected" | "not_connected" | "unreachable";
 
 /** Filesystem and MCP-state access the extension needs (the PlanModeDeps pattern). */
-export interface McpEnforcerDeps {
+export interface CodebaseMemoryMcpEnforcerDeps {
   existsSync(path: string): boolean;
   cwd(): string;
-  getMcpStatus(): McpStatus;
-  recordMcpStatusSnapshot(snapshot: unknown): void;
+  getCodebaseMemoryMcpStatus(): CodebaseMemoryMcpStatus;
+  recordCodebaseMemoryMcpStatusSnapshot(snapshot: unknown): void;
 }
 
 // The adapter's versioned status-event channel (pi-mcp-adapter/types.ts).
@@ -54,7 +54,7 @@ const MCP_STATUS_EVENT = "pi-mcp-adapter/status/v1";
 const SERVER_NAME = "codebase-memory-mcp";
 
 /** Map an adapter status snapshot onto the enforcer's tri-state. */
-const statusFromSnapshot = (snapshot: unknown): McpStatus => {
+const statusFromSnapshot = (snapshot: unknown): CodebaseMemoryMcpStatus => {
   if (typeof snapshot !== "object" || snapshot === null) return "not_connected";
   const servers = (snapshot as { servers?: unknown }).servers;
   if (!Array.isArray(servers)) return "not_connected";
@@ -74,13 +74,13 @@ const statusFromSnapshot = (snapshot: unknown): McpStatus => {
  * "not connected" (the safe default — connecting an already-connected server
  * is a no-op) and updates from the adapter's status events.
  */
-export const createDefaultDeps = (): McpEnforcerDeps => {
-  let status: McpStatus = "not_connected";
+export const createDefaultDeps = (): CodebaseMemoryMcpEnforcerDeps => {
+  let status: CodebaseMemoryMcpStatus = "not_connected";
   return {
     existsSync,
     cwd: () => process.cwd(),
-    getMcpStatus: () => status,
-    recordMcpStatusSnapshot: (snapshot: unknown): void => {
+    getCodebaseMemoryMcpStatus: () => status,
+    recordCodebaseMemoryMcpStatusSnapshot: (snapshot: unknown): void => {
       status = statusFromSnapshot(snapshot);
     },
   };
@@ -93,7 +93,7 @@ const defaultDeps = createDefaultDeps();
 // ---------------------------------------------------------------------------
 
 /** Walk up from `dir` looking for a `.git` directory, at most 16 levels. */
-const findGitRoot = (dir: string, deps: McpEnforcerDeps): string | null => {
+const findGitRoot = (dir: string, deps: CodebaseMemoryMcpEnforcerDeps): string | null => {
   let current = dir;
   for (let i = 0; i < 16; i++) {
     if (deps.existsSync(join(current, ".git"))) return current;
@@ -224,13 +224,13 @@ const STOP_MESSAGE =
 // Extension
 // ---------------------------------------------------------------------------
 
-export const createMcpEnforcerExtension = (
+export const createCodebaseMemoryMcpEnforcerExtension = (
   pi: ExtensionAPI,
-  deps: McpEnforcerDeps = defaultDeps,
+  deps: CodebaseMemoryMcpEnforcerDeps = defaultDeps,
 ): void => {
   // --- Track the MCP server's status from the adapter's event bus ---
   pi.events.on(MCP_STATUS_EVENT, (snapshot) => {
-    deps.recordMcpStatusSnapshot(snapshot);
+    deps.recordCodebaseMemoryMcpStatusSnapshot(snapshot);
   });
 
   // --- Hard-intercept bash code search ---
@@ -248,7 +248,7 @@ export const createMcpEnforcerExtension = (
     const gitRoot = findGitRoot(deps.cwd(), deps);
     if (!gitRoot) return; // not in a git repo, allow
 
-    const status = deps.getMcpStatus();
+    const status = deps.getCodebaseMemoryMcpStatus();
     if (status === "unreachable") {
       return { block: true, reason: STOP_MESSAGE };
     }
@@ -274,8 +274,8 @@ export const createMcpEnforcerExtension = (
   });
 };
 
-const mcpEnforcerExtension = (pi: ExtensionAPI): void => {
-  createMcpEnforcerExtension(pi);
+const codebaseMemoryMcpEnforcerExtension = (pi: ExtensionAPI): void => {
+  createCodebaseMemoryMcpEnforcerExtension(pi);
 };
 
-export default mcpEnforcerExtension;
+export default codebaseMemoryMcpEnforcerExtension;

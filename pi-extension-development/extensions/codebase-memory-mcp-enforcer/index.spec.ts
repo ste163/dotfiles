@@ -1,10 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import mcpEnforcerExtension, {
+import codebaseMemoryMcpEnforcerExtension, {
   createDefaultDeps,
-  createMcpEnforcerExtension,
-  type McpEnforcerDeps,
-  type McpStatus,
+  createCodebaseMemoryMcpEnforcerExtension,
+  type CodebaseMemoryMcpEnforcerDeps,
+  type CodebaseMemoryMcpStatus,
 } from "./index.ts";
 
 // --- Minimal fake for the pi extension API surface this extension uses ---
@@ -55,16 +55,16 @@ const fireStatusEvent = (pi: FakePi, snapshot: unknown): void => {
 // joins "<dir>/.git" itself, so tests list those full paths.
 function createFakeDeps(
   existingPaths: string[] = [],
-  status: McpStatus = "not_connected",
+  status: CodebaseMemoryMcpStatus = "not_connected",
   cwd = "/virtual/repo",
-): McpEnforcerDeps & { recorded: unknown[] } {
+): CodebaseMemoryMcpEnforcerDeps & { recorded: unknown[] } {
   const paths = new Set(existingPaths);
   const recorded: unknown[] = [];
   return {
     existsSync: (path: string) => paths.has(path),
     cwd: () => cwd,
-    getMcpStatus: () => status,
-    recordMcpStatusSnapshot: (snapshot: unknown): void => {
+    getCodebaseMemoryMcpStatus: () => status,
+    recordCodebaseMemoryMcpStatusSnapshot: (snapshot: unknown): void => {
       recorded.push(snapshot);
     },
     recorded,
@@ -88,7 +88,7 @@ async function callHandler(pi: FakePi, event: string, eventPayload: unknown): Pr
   return runFrom(0);
 }
 
-type Pi = Parameters<typeof createMcpEnforcerExtension>[0];
+type Pi = Parameters<typeof createCodebaseMemoryMcpEnforcerExtension>[0];
 
 // 20 directory levels deep: the walk's 16-level budget ends before the walk
 // can reach the filesystem root, so findGitRoot returns null via exhaustion.
@@ -107,14 +107,14 @@ const snapshotWithStatus = (status: string): unknown => ({
 
 test("registers handlers and subscribes to the adapter status channel", () => {
   const pi = createFakePi();
-  createMcpEnforcerExtension(pi as unknown as Pi);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi);
   assert.deepEqual([...pi.handlers.keys()].toSorted(), ["before_agent_start", "tool_call"]);
   assert.deepEqual(pi.subscribedChannels, ["pi-mcp-adapter/status/v1"]);
 });
 
 test("default export wires the factory with the default deps", () => {
   const pi = createFakePi();
-  mcpEnforcerExtension(pi as unknown as Pi);
+  codebaseMemoryMcpEnforcerExtension(pi as unknown as Pi);
   assert.ok(pi.handlers.has("tool_call"));
   assert.ok(pi.handlers.has("before_agent_start"));
   assert.ok(pi.statusHandlers.has("pi-mcp-adapter/status/v1"));
@@ -123,52 +123,52 @@ test("default export wires the factory with the default deps", () => {
 test("default deps use the real cwd and start not connected", () => {
   const deps = createDefaultDeps();
   assert.equal(typeof deps.cwd(), "string");
-  assert.equal(deps.getMcpStatus(), "not_connected");
+  assert.equal(deps.getCodebaseMemoryMcpStatus(), "not_connected");
 });
 
 test("the default status provider maps adapter snapshots onto the tri-state", () => {
   const deps = createDefaultDeps();
 
-  deps.recordMcpStatusSnapshot(snapshotWithStatus("connected"));
-  assert.equal(deps.getMcpStatus(), "connected");
+  deps.recordCodebaseMemoryMcpStatusSnapshot(snapshotWithStatus("connected"));
+  assert.equal(deps.getCodebaseMemoryMcpStatus(), "connected");
 
-  deps.recordMcpStatusSnapshot(snapshotWithStatus("failed"));
-  assert.equal(deps.getMcpStatus(), "unreachable");
+  deps.recordCodebaseMemoryMcpStatusSnapshot(snapshotWithStatus("failed"));
+  assert.equal(deps.getCodebaseMemoryMcpStatus(), "unreachable");
 
-  deps.recordMcpStatusSnapshot(snapshotWithStatus("not-connected"));
-  assert.equal(deps.getMcpStatus(), "not_connected");
+  deps.recordCodebaseMemoryMcpStatusSnapshot(snapshotWithStatus("not-connected"));
+  assert.equal(deps.getCodebaseMemoryMcpStatus(), "not_connected");
 });
 
 test("the default status provider treats other snapshot statuses as not connected", () => {
   const deps = createDefaultDeps();
   // Sequential updates on one provider; each snapshot replaces the last state.
   for (const status of ["cached", "needs-auth", "disabled"]) {
-    deps.recordMcpStatusSnapshot(snapshotWithStatus(status));
-    assert.equal(deps.getMcpStatus(), "not_connected");
+    deps.recordCodebaseMemoryMcpStatusSnapshot(snapshotWithStatus(status));
+    assert.equal(deps.getCodebaseMemoryMcpStatus(), "not_connected");
   }
 });
 
 test("the default status provider ignores malformed snapshots and missing servers", () => {
   const deps = createDefaultDeps();
 
-  deps.recordMcpStatusSnapshot(null);
-  deps.recordMcpStatusSnapshot("not a snapshot");
-  deps.recordMcpStatusSnapshot({ version: 1 });
-  deps.recordMcpStatusSnapshot({ version: 1, servers: [] });
-  deps.recordMcpStatusSnapshot({
+  deps.recordCodebaseMemoryMcpStatusSnapshot(null);
+  deps.recordCodebaseMemoryMcpStatusSnapshot("not a snapshot");
+  deps.recordCodebaseMemoryMcpStatusSnapshot({ version: 1 });
+  deps.recordCodebaseMemoryMcpStatusSnapshot({ version: 1, servers: [] });
+  deps.recordCodebaseMemoryMcpStatusSnapshot({
     version: 1,
     servers: [
       42,
       { name: "some-other-server", status: "connected", toolCount: 3, disabled: false },
     ],
   });
-  assert.equal(deps.getMcpStatus(), "not_connected");
+  assert.equal(deps.getCodebaseMemoryMcpStatus(), "not_connected");
 });
 
 test("subscribes to the status channel and records every snapshot", () => {
   const pi = createFakePi();
   const deps = createFakeDeps();
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   fireStatusEvent(pi, snapshotWithStatus("connected"));
   fireStatusEvent(pi, snapshotWithStatus("failed"));
@@ -178,7 +178,7 @@ test("subscribes to the status channel and records every snapshot", () => {
 test("blocks bash code-search with the redirect message when connected", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"], "connected");
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = (await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -199,7 +199,7 @@ test("blocks bash code-search with the redirect message when connected", async (
 test("blocks with a connect-first message when the server is not connected", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"], "not_connected");
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = (await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -215,7 +215,7 @@ test("blocks with a connect-first message when the server is not connected", asy
 test("blocks with a stop message when the server is unreachable", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"], "unreachable");
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = (await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -232,7 +232,7 @@ test("blocks with a stop message when the server is unreachable", async () => {
 test("blocks when the git root sits above the cwd", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/.git"], "not_connected", "/virtual/repo");
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = (await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -245,7 +245,7 @@ test("blocks when the git root sits above the cwd", async () => {
 test("allows bash commands that are neither allowlisted nor code search", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -257,7 +257,7 @@ test("allows bash commands that are neither allowlisted nor code search", async 
 test("allows every allowlisted leading command", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   // The five calls are independent of each other, so they run concurrently.
   const results = await Promise.all(
@@ -271,7 +271,7 @@ test("allows every allowlisted leading command", async () => {
 test("allows ls with flags and with dashed paths", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const flags = await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -289,7 +289,7 @@ test("allows ls with flags and with dashed paths", async () => {
 test("blocks allowlisted leading commands that nest a search in substitution", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = (await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -302,7 +302,7 @@ test("blocks allowlisted leading commands that nest a search in substitution", a
 test("blocks an allowlisted command piped, chained, or process-substituted into search", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const piped = (await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -326,7 +326,7 @@ test("blocks an allowlisted command piped, chained, or process-substituted into 
 test("allows grep-family searches that name only docs or config files", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"], "connected");
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   // The calls are independent of each other, so they run concurrently.
   const results = await Promise.all(
@@ -345,7 +345,7 @@ test("allows grep-family searches that name only docs or config files", async ()
 test("blocks searches with code targets, no targets, or compound forms", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"], "connected");
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const commands = [
     "grep foo src/*.ts",
@@ -371,7 +371,7 @@ test("blocks searches with code targets, no targets, or compound forms", async (
 test("allows tool calls that are not bash", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = await callHandler(pi, "tool_call", {
     toolName: "read",
@@ -383,7 +383,7 @@ test("allows tool calls that are not bash", async () => {
 test("allows code search outside a git repo (walk exhausts its depth budget)", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps([], "not_connected", DEEP_CWD);
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = await callHandler(pi, "tool_call", {
     toolName: "bash",
@@ -395,7 +395,7 @@ test("allows code search outside a git repo (walk exhausts its depth budget)", a
 test("prepends the MCP reminder when inside a git repo", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(["/virtual/repo/.git"]);
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = (await callHandler(pi, "before_agent_start", {
     systemPrompt: "BASE PROMPT",
@@ -411,7 +411,7 @@ test("prepends the MCP reminder when inside a git repo", async () => {
 test("leaves the system prompt alone outside a git repo (walk breaks at the root)", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps([], "not_connected", "/w");
-  createMcpEnforcerExtension(pi as unknown as Pi, deps);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, deps);
 
   const result = await callHandler(pi, "before_agent_start", { systemPrompt: "BASE" });
   assert.equal(result, undefined);

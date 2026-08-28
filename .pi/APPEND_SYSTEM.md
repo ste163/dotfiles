@@ -1,8 +1,8 @@
 ## MCP FIRST — codebase-memory-mcp mandatory
 
 In a git repo, search code with the MCP tools, not grep/rg. The
-mcp-enforcer extension blocks bash code search, and every block message
-names the exact call to make.
+codebase-memory-mcp-enforcer extension blocks bash code search, and every
+block message names the exact call to make.
 
 Gateway form (the server auto-connects at startup):
 

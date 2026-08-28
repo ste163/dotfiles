@@ -73,7 +73,7 @@ you add one.
   Simplified Technical English on technical prose. Mode is pragmatic; say
   "STE" for strict mode. `APPEND_SYSTEM.md` keeps it always on.
 
-To update the skill: re-download the four files from `skills/simple-english/`
+To update the skill: re-download the files from `skills/simple-english/`
 in the upstream repo, then update the pin above. pi-lens autofix may reformat
 table padding on save — cosmetic only.
 
