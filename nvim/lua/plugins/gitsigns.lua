@@ -17,6 +17,6 @@ require('gitsigns').setup({
     end
 
     map('n', '<leader>gb', gitsigns.blame, { desc = 'Open git blame buffer' })
-    map('n', '<leader>tb', gitsigns.toggle_current_line_blame, { desc = 'Toggle git blame line' })
+    map('n', '<leader>gB', gitsigns.toggle_current_line_blame, { desc = 'Toggle git blame line' })
   end
 })
