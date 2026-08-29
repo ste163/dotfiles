@@ -4,6 +4,8 @@ vim.opt.relativenumber = true
 vim.opt.mouse = "a"
 
 vim.opt.wrap = false
+-- Marker shown at the start of wrapped continuation lines (only visible when wrap is on)
+vim.opt.showbreak = "↪ "
 vim.opt.winborder = "rounded"
 -- Buffer borders
 vim.opt.laststatus = 3
