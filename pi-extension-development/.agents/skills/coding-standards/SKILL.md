@@ -9,6 +9,9 @@ description: TypeScript coding standards and testing conventions for this projec
 
 - **Arrow functions over function declarations/expressions.** Prefer
   `const foo = (...) => {}` everywhere a real function isn't required.
+- **No mutation. `const` only — never `let`.** Use recursion over loops and
+  pure functions over rebinding. Do not store runtime state — encode the
+  decision in the message or output instead, and derive at read time.
 - **Follow SRP.** Each function/module does one thing; split instead of
   growing a function to cover multiple responsibilities.
 - **Never use default exports** — with one exception: `extensions/<name>/index.ts` must `export default` the extension factory function, since pi's extension loader requires it (see pi's own `docs/extensions.md`: "Entry point (exports default function)"). Every other file/export in the project uses named exports only.
@@ -20,7 +23,7 @@ description: TypeScript coding standards and testing conventions for this projec
 - **No `Set` without a real, verifiable reason.** For membership checks, use
   a `readonly string[]` with `.includes()`. At the sizes this project uses,
   `Set.has()` buys nothing measurable. Use `reduce` for dedup/aggregation.
-  "Verifiable" means measured evidence, not taste. 
+  "Verifiable" means measured evidence, not taste.
 - **Fail fast.** Validate/guard early and throw/return immediately on bad
   state rather than letting it propagate.
 - **Never disable a lint rule to silence it** — fix the underlying issue
