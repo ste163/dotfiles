@@ -34,10 +34,47 @@ vim.keymap.set(
 
 vim.keymap.set("t", "<Esc>", [[<C-\><C-n>]], { noremap = true, desc = "Exit the terminal" })
 
-vim.keymap.set("n", "<leader>u", "<cmd>Undotree<CR>", { desc = "Open Undotree" })
-
 vim.keymap.set("n", "<C-_>", "gcc", { remap = true, desc = "Toggle comments" })
 vim.keymap.set("v", "<C-_>", "gc", { remap = true, desc = "Toggle comments" })
+
+-- ---------------------------------------------------------------------------
+-- Word wrap / reading mode
+--
+-- <leader>w toggles word-boundary soft wrap for the current window only.
+-- The maps below make navigation display-line aware: gj/gk/g0/g$/g^ are
+-- built-in motions that behave exactly like j/k/0/$/^ when wrap is off, so
+-- installing them once, globally, is safe. Operator-pending motions (dj, yk,
+-- ...) are untouched — edits keep working on real physical lines.
+-- ---------------------------------------------------------------------------
+
+local wrap_nav = { silent = true }
+
+vim.keymap.set({ "n", "v" }, "j", "gj", wrap_nav)
+vim.keymap.set({ "n", "v" }, "k", "gk", wrap_nav)
+vim.keymap.set({ "n", "v" }, "0", "g0", wrap_nav)
+vim.keymap.set({ "n", "v" }, "$", "g$", wrap_nav)
+vim.keymap.set({ "n", "v" }, "^", "g^", wrap_nav)
+
+local function set_wrap(on)
+  vim.wo.wrap = on
+  vim.wo.linebreak = on -- wrap at word boundaries (breakat chars), not mid-word
+  vim.wo.breakindent = on -- align wrapped lines with the original line's indent
+end
+
+-- Toggle flips whatever the current state is, however it got set.
+vim.keymap.set("n", "<leader>w", function()
+  set_wrap(not vim.wo.wrap)
+end, { desc = "Toggle word wrap (window)" })
+
+-- Markdown and prose files read better wrapped. FileType fires once per buffer,
+-- so a manual <leader>w override sticks for the life of that window.
+vim.api.nvim_create_autocmd("FileType", {
+  group = vim.api.nvim_create_augroup("UserWrapDefaults", { clear = true }),
+  pattern = { "markdown", "text" },
+  callback = function()
+    set_wrap(true)
+  end,
+})
 
 -- LSP keymaps
 local keymap = vim.keymap -- for conciseness
