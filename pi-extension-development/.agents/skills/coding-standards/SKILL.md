@@ -17,7 +17,10 @@ description: TypeScript coding standards and testing conventions for this projec
   private. Don't export "just in case."
 - **Prefer ternaries** over if/else for simple conditional expressions, and
   **prefer built-ins** (`.map`, `.reduce`, `.filter`, etc.) over manual loops.
-- **Use `reduce` over `Set`** for dedup/aggregation-style logic.
+- **No `Set` without a real, verifiable reason.** For membership checks, use
+  a `readonly string[]` with `.includes()`. At the sizes this project uses,
+  `Set.has()` buys nothing measurable. Use `reduce` for dedup/aggregation.
+  "Verifiable" means measured evidence, not taste. 
 - **Fail fast.** Validate/guard early and throw/return immediately on bad
   state rather than letting it propagate.
 - **Never disable a lint rule to silence it** — fix the underlying issue

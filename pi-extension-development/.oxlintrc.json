@@ -4,6 +4,9 @@
     "suspicious": "error",
     "perf": "error"
   },
+  "rules": {
+    "unicorn/prefer-set-has": "off"
+  },
   "env": {
     "node": true
   },

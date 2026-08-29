@@ -31,13 +31,13 @@ import { join } from "node:path";
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
-// Dependencies (injected — tests never touch real disk or process state)
+// Dependencies
 // ---------------------------------------------------------------------------
 
 /** MCP connection state as the enforcer understands it. */
 export type CodebaseMemoryMcpStatus = "connected" | "not_connected" | "unreachable";
 
-/** Filesystem and MCP-state access the extension needs (the PlanModeDeps pattern). */
+/** Filesystem and MCP-state access the extension needs. */
 export interface CodebaseMemoryMcpEnforcerDeps {
   existsSync(path: string): boolean;
   cwd(): string;
@@ -86,8 +86,6 @@ export const createDefaultDeps = (): CodebaseMemoryMcpEnforcerDeps => {
   };
 };
 
-const defaultDeps = createDefaultDeps();
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -132,7 +130,7 @@ const looksLikeCodeSearch = (command: string): boolean =>
 // ---------------------------------------------------------------------------
 
 // Leading commands that always pass, before any block pattern runs.
-const ALLOWED_COMMANDS: ReadonlySet<string> = new Set(["ls", "pwd", "echo", "readlink", "stat"]);
+const ALLOWED_COMMANDS: readonly string[] = new Set(["ls", "pwd", "echo", "readlink", "stat"]);
 
 // Operators that end the allowlist pass. A command that contains any of these
 // is not one simple command: pipes and chains run a second command the
@@ -153,7 +151,7 @@ const isAllowlisted = (command: string): boolean => {
 
 // Docs/config file extensions: grep over named files with these extensions
 // is not code search. This list is the only knob in the exemption.
-const DOCS_EXTENSIONS: ReadonlySet<string> = new Set([
+const DOCS_EXTENSIONS: readonly string[] = new Set([
   ".md",
   ".txt",
   ".json",
@@ -165,7 +163,7 @@ const DOCS_EXTENSIONS: ReadonlySet<string> = new Set([
 ]);
 
 // The content-search commands the exemption covers.
-const SEARCH_FAMILY: ReadonlySet<string> = new Set(["grep", "rg", "ack", "ag"]);
+const SEARCH_FAMILY: readonly string[] = ["grep", "rg", "ack", "ag"];
 
 // Replace every quoted segment with one placeholder token, so a pattern with
 // spaces stays one token and operators inside quotes do not disqualify.
@@ -186,7 +184,7 @@ const isDocsOnlySearch = (command: string): boolean => {
   if (DISQUALIFIERS.some((d) => stripped.includes(d))) return false;
   const tokens = stripped.trim().split(/\s+/);
   const leading = tokens[0] as string;
-  if (!SEARCH_FAMILY.has(leading)) return false;
+  if (!SEARCH_FAMILY.includes(leading)) return false;
   const args = tokens.slice(1).filter((token) => !token.startsWith("-"));
   const pattern = args[0];
   if (pattern === undefined) return false;
@@ -226,14 +224,14 @@ const STOP_MESSAGE =
 
 export const createCodebaseMemoryMcpEnforcerExtension = (
   pi: ExtensionAPI,
-  deps: CodebaseMemoryMcpEnforcerDeps = defaultDeps,
+  deps: CodebaseMemoryMcpEnforcerDeps,
 ): void => {
-  // --- Track the MCP server's status from the adapter's event bus ---
+  // Track the MCP server's status from the adapter's event bus
   pi.events.on(MCP_STATUS_EVENT, (snapshot) => {
     deps.recordCodebaseMemoryMcpStatusSnapshot(snapshot);
   });
 
-  // --- Hard-intercept bash code search ---
+  // Hard-intercept bash code search
   pi.on("tool_call", (event) => {
     if (!isToolCallEventType("bash", event)) return;
 
@@ -258,7 +256,7 @@ export const createCodebaseMemoryMcpEnforcerExtension = (
     return { block: true, reason: redirectMessage(gitRoot) };
   });
 
-  // --- Pre-turn MCP reminder (fights context decay) ---
+  // Pre-turn MCP reminder (fights context decay)
   pi.on("before_agent_start", (event) => {
     if (!findGitRoot(deps.cwd(), deps)) return; // not in a git repo, no reminder needed
 
@@ -275,7 +273,7 @@ export const createCodebaseMemoryMcpEnforcerExtension = (
 };
 
 const codebaseMemoryMcpEnforcerExtension = (pi: ExtensionAPI): void => {
-  createCodebaseMemoryMcpEnforcerExtension(pi);
+  createCodebaseMemoryMcpEnforcerExtension(pi, createDefaultDeps());
 };
 
 export default codebaseMemoryMcpEnforcerExtension;

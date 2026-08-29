@@ -58,10 +58,9 @@ function createFakeDeps(
   status: CodebaseMemoryMcpStatus = "not_connected",
   cwd = "/virtual/repo",
 ): CodebaseMemoryMcpEnforcerDeps & { recorded: unknown[] } {
-  const paths = new Set(existingPaths);
   const recorded: unknown[] = [];
   return {
-    existsSync: (path: string) => paths.has(path),
+    existsSync: (path: string) => existingPaths.includes(path),
     cwd: () => cwd,
     getCodebaseMemoryMcpStatus: () => status,
     recordCodebaseMemoryMcpStatusSnapshot: (snapshot: unknown): void => {
@@ -107,7 +106,7 @@ const snapshotWithStatus = (status: string): unknown => ({
 
 test("registers handlers and subscribes to the adapter status channel", () => {
   const pi = createFakePi();
-  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi);
+  createCodebaseMemoryMcpEnforcerExtension(pi as unknown as Pi, createDefaultDeps());
   assert.deepEqual([...pi.handlers.keys()].toSorted(), ["before_agent_start", "tool_call"]);
   assert.deepEqual(pi.subscribedChannels, ["pi-mcp-adapter/status/v1"]);
 });
