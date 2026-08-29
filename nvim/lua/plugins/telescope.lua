@@ -72,8 +72,26 @@ vim.pack.add({
 })
 
 require("telescope").setup({
+    defaults = {
+        -- Arguments for live_grep / grep_string (<leader>fa). Telescope's
+        -- defaults omit --hidden, so dotfiles (.env, .github, .eslintrc, ...)
+        -- were invisible to text search. Gitignore rules still apply here;
+        -- <leader>fA is the include-ignored escape hatch.
+        vimgrep_arguments = {
+            "rg",
+            "--color=never",
+            "--no-heading",
+            "--with-filename",
+            "--line-number",
+            "--column",
+            "--smart-case",
+            "--hidden", -- search dotfiles (gitignore rules still filter them)
+        },
+    },
     pickers = {
         find_files = {
+            -- --hidden only reveals dotfiles; gitignore rules still filter
+            -- (.env, .github, ... stay invisible — <leader>fi for those)
             hidden = true,
             file_ignore_patterns = { ".git/" },
         },
@@ -103,3 +121,24 @@ local builtin = require("telescope.builtin")
 
 vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Telescope find files" })
 vim.keymap.set("n", "<leader>fa", builtin.live_grep, { desc = "Telescope find all instances of text" })
+
+-- Escape hatches for files that gitignore/.ignore rules hide from ff/fa
+-- (e.g. .env or .github in some TypeScript projects). --no-ignore reveals
+-- EVERYTHING, so .git internals and node_modules (normally excluded only by
+-- gitignore) are re-excluded with explicit rg globs.
+
+-- <leader>fi — find files, including gitignored ones
+vim.keymap.set("n", "<leader>fi", function()
+	builtin.find_files({
+		find_command = { "rg", "--files", "--color", "never", "--hidden", "--no-ignore", "--glob", "!.git/**", "--glob", "!node_modules/**" },
+	})
+end, { desc = "Telescope find files (include gitignored)" })
+
+-- <leader>fA — grep text, including gitignored files
+vim.keymap.set("n", "<leader>fA", function()
+	builtin.live_grep({
+		additional_args = function()
+			return { "--hidden", "--no-ignore", "--glob", "!.git/**", "--glob", "!node_modules/**" }
+		end,
+	})
+end, { desc = "Telescope find all text (include gitignored)" })
