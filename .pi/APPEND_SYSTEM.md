@@ -24,6 +24,12 @@ user mention) — read/read_symbol is fine, no MCP call needed first.
 Never put emojis in code, strings, comments, or commit messages. Use plain
 text only.
 
+## Directory listings
+
+When you list a directory, use `ls -A` or `ls -la`. Plain `ls` and glob
+expansion hide dotfiles, and this repo keeps real config in hidden files
+(.pi/, .agents/, .oxlintrc.json, .gitignore).
+
 ## simple-english
 
 Always write prose in the `simple-english` skill style: ASD-STE100 Simplified
