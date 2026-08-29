@@ -34,7 +34,7 @@ export const defaultDeps: CodebaseMemoryMcpEnforcerDeps = {
   cwd: () => process.cwd(),
 };
 
-/** Walk up from `dir` looking for a `.git` directory, at most 16 levels. */
+/** Walk up from `dir` looking for a `.git` directory — `dir` plus up to 16 parents, 17 directories at most. */
 const findGitRoot = (dir: string, deps: CodebaseMemoryMcpEnforcerDeps): string | null => {
   const walk = (current: string, levelsLeft: number): string | null => {
     if (deps.existsSync(join(current, ".git"))) return current;
@@ -49,6 +49,9 @@ const findGitRoot = (dir: string, deps: CodebaseMemoryMcpEnforcerDeps): string |
 // Patterns that indicate code search (not general shell use).
 // These are deliberately aggressive — false positives are fine because the
 // agent can always use `read` on a known path (allowed by the rule).
+// Not exhaustive: awk, sed, and friends also search file contents and pass
+// unblocked. Extend this list if agents continuously skip the MCP server
+// with them.
 const CODE_SEARCH_PATTERNS: RegExp[] = [
   // grep / rg used for searching file contents
   /\bgrep\b/,

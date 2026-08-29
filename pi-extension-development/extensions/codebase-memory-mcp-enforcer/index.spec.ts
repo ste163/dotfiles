@@ -58,8 +58,9 @@ async function callHandler(pi: FakePi, event: string, eventPayload: unknown): Pr
 
 type Pi = Parameters<typeof createCodebaseMemoryMcpEnforcerExtension>[0];
 
-// 20 directory levels deep: the walk's 16-level budget ends before the walk
-// can reach the filesystem root, so findGitRoot returns null via exhaustion.
+// 20 directory levels deep: the walk checks at most 17 directories (the
+// cwd plus 16 parents), so it exhausts its budget before reaching the
+// filesystem root and findGitRoot returns null.
 const DEEP_CWD =
   "/one/two/three/four/five/six/seven/eight/nine/ten/eleven/twelve/thirteen/fourteen/fifteen/sixteen/seventeen/eighteen/nineteen/twenty";
 
@@ -70,7 +71,7 @@ test("registers one handler each for tool_call and before_agent_start", () => {
 });
 
 test("default deps use the real cwd", () => {
-  assert.equal(typeof defaultDeps.cwd(), "string");
+  assert.equal(defaultDeps.cwd(), process.cwd());
 });
 
 test("blocks bash code-search with the ladder message", async () => {
