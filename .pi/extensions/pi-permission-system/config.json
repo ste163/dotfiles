@@ -1,6 +1,9 @@
 {
   "permission": {
     "*": "allow",
+    "edit": "ask",
+    "write": "ask",
+    "mcp": "allow",
     "path": {
       "*": "allow",
       "*.env": "deny",

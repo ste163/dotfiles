@@ -109,7 +109,7 @@ test("markCompletedSteps", async (t) => {
   await t.test("ignores DONE markers with no matching step", () => {
     const items: TodoItem[] = [{ step: 1, text: "a", completed: false }];
     const count = markCompletedSteps("[DONE:99]", items);
-    assert.equal(count, 1);
+    assert.equal(count, 0);
     assert.equal(items[0]?.completed, false);
   });
 });
