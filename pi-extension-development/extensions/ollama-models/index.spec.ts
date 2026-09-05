@@ -115,7 +115,7 @@ test("createOllamaModelsExtension registers the locked provider config", () => {
   assert.equal(config.apiKey, "ollama");
   assert.equal(config.api, "openai-completions");
   assert.equal(config.models, SEED_MODELS);
-  assert.equal(config.refreshModels, undefined); // the rework removed it
+  assert.equal(config.refreshModels, undefined); // no refreshModels: the session_start handler owns the refresh
   assert.ok(handlers.has("session_start"));
 });
 

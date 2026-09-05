@@ -26,5 +26,4 @@ nothing), so the built-in catalog is the source of truth:
    `pi-extension-development/` (typecheck, lint, format, test — see AGENTS.md
    there). Every file stays at 100% coverage.
 
-Removing a model is the same in reverse. Design history and verification
-records live in `ollama-plan.md`, one directory up.
+Removing a model is the same in reverse.

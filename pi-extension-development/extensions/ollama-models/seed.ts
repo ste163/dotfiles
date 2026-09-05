@@ -1,11 +1,9 @@
 /**
  * Seed catalog for the ollama-models extension.
  *
- * Seed-driven by design: the local daemon cannot enumerate
- * cloud models (GET /api/tags and /v1/models return nothing), so the catalog
- * is fixed to the `:cloud` ids below. The seed doubles as the
- * offline/first-launch fallback for refreshModels.
- *
+ * The local daemon cannot enumerate its models (GET /api/tags and /v1/models
+ * return nothing), so the catalog is fixed to the ids below. The seed serves
+ * until the first fetch lands and whenever the daemon is unreachable.
  */
 
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
@@ -19,9 +17,9 @@ export const SEED_MODEL_IDS = [
 ] as const;
 
 /**
- * Compat block adopted verbatim from upstream pi-ollama-cloud buildCompat()
- * (plan Decision #10). Every flag is explicit so the wire contract stays
- * visible.
+ * Explicit OpenAI-compat block so behavior does not depend on pi's
+ * auto-detection from the provider name or baseUrl. Every flag states the
+ * daemon's actual wire behavior.
  */
 const buildCompat = (): ProviderModelConfig["compat"] => ({
   // Ollama serves the "system" role, not "developer".
@@ -51,15 +49,16 @@ const buildSeed = (id: string, contextWindow: number, vision: boolean): Provider
   id,
   name: id,
   reasoning: true,
-  // Decision #6: "off" hidden = reasoning always on; "max" verified live.
+  // "off" is hidden: these models think by default. "max" is the only level
+  // verified to produce visible reasoning.
   thinkingLevelMap: { off: null, max: "max" },
-  // Decision #5: vision from the daemon's capability report (gemma4 + qwen3.5).
+  // vision=true only where the daemon reports the vision capability.
   input: (vision ? ["text", "image"] : ["text"]) as ("text" | "image")[],
-  // Decision #9: zero-cost placeholder (the field is required).
+  // cost is a required field; this extension does not track pricing.
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   // Verified context windows from the live daemon.
   contextWindow,
-  // Decision #4: flat conservative value; /api/show exposes no max-output.
+  // /api/show exposes no max-output; 32768 is a safe cap under every context window.
   maxTokens: 32768,
   compat: buildCompat(),
 });

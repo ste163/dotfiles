@@ -2,8 +2,7 @@
  * Assembly: a seed entry plus a live /api/show document -> a catalog entry.
  *
  * Live data (capabilities, model_info) wins; static seed fields (name, thinking
- * map, cost, maxTokens, compat) pass through (plan Decisions #4/#6/#9/#10).
- * A model whose show response lacks the "tools" capability is dropped — pi is
+ * map, cost, maxTokens, compat) pass through. A model whose show response lacks the "tools" capability is dropped — pi is
  * a tool-calling agent, and a tools-less entry is not selectable.
  */
 
@@ -30,7 +29,7 @@ export function assembleModel(
 
 /**
  * Merge live show documents over a fallback catalog. Entries without show
- * data (failed fetch, daemon down) keep their fallback values (Decision #7);
+ * data (failed fetch, daemon down) keep their fallback values; entries whose
  * entries whose show lacks "tools" are dropped.
  */
 export function assembleModels(

@@ -2,8 +2,7 @@
  * Local daemon API client for the ollama-models extension.
  *
  * POST /api/show needs no auth: the daemon attaches the cloud sign-in when it
- * proxies (plan Decision #2). Everything here is fail-soft — a failed request
- * resolves to { ok: false } and the caller keeps that model's fallback entry.
+ * proxies. Everything here is fail-soft — a failed request resolves to { ok: false } and the caller keeps that model's fallback entry.
  * Nothing in this module throws.
  */
 
@@ -26,9 +25,8 @@ export interface ShowResponse {
 export type ShowResult = { ok: true; data: ShowResponse } | { ok: false };
 
 /**
- * Host dependencies, injected per the PlanModeDeps rule (plan Decision #13):
- * tests pass fakes, so no unit test touches the real network. The fake clock
- * died with the cooldown; only fetch remains.
+ * Host dependencies, injected so tests pass fakes and no unit test touches
+ * the real network.
  */
 export interface OllamaModelsDeps {
   fetch: (input: string, init?: RequestInit) => Promise<Response>;
@@ -66,8 +64,7 @@ export async function fetchShow(
 
 /**
  * Find `<arch>.context_length` in a /api/show model_info block. Returns
- * undefined when no numeric key matches, so the caller keeps its seed value
- * (deliberate divergence from upstream, which falls back to 128000).
+ * undefined when no numeric key matches, so the caller keeps its seed value.
  */
 export function getContextLength(modelInfo: Record<string, unknown>): number | undefined {
   for (const [key, value] of Object.entries(modelInfo)) {

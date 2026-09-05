@@ -1,17 +1,19 @@
 /**
  * ollama-models extension.
  *
- * Owns the "ollama" provider (plan Decision #1: same id, so settings.json and
- * the /model UX stay unchanged). Registers a seed catalog of the four
- * cloud-routed models served by the local daemon, then fetches live metadata
- * (context window, capabilities) from POST /api/show once per pi process
- * start and swaps it in. No ollama.com, no API key, no new credentials — the
- * daemon attaches the cloud sign-in when it proxies (plan Decisions #2/#3).
+ * Owns the "ollama" provider under its existing id, so settings.json and the
+ * /model UX stay unchanged. Registers a seed catalog of the cloud-routed
+ * models served by the local daemon, then fetches live metadata (context
+ * window, capabilities) from POST /api/show once per pi process start and
+ * swaps it in. No ollama.com, no API key, no new credentials — the daemon
+ * attaches the cloud sign-in when it proxies.
  *
- * Refresh model (rework, 2026-09-05): pi's refreshModels path is gone. A
- * session_start handler owns the fetch — reasons "startup" and "reload" only,
- * since models live for the process lifetime and /new, /resume, /fork reuse
- * the already-fetched catalog. See ollama-plan.md, "Rework plan".
+ * A session_start handler owns the fetch instead of pi's refreshModels
+ * callback: that callback cannot tell a startup refresh from a /model-open
+ * refresh and has no access to the UI, while the handler fires exactly where
+ * we want (reasons "startup" and "reload" — models live for the process
+ * lifetime, so /new, /resume, /fork reuse the already-fetched catalog) and
+ * can tell the user what happened.
  */
 
 import type {
@@ -30,19 +32,19 @@ import {
 } from "./ollama-api.ts";
 import { SEED_MODEL_IDS, SEED_MODELS } from "./seed.ts";
 
-// Host dependencies, injected per the PlanModeDeps rule (plan Decision #13):
-// a builtin reference, not an arrow wrapper, so no extra function body exists
-// that tests would have to call.
+// Host dependencies, injectable so tests pass fakes. A builtin reference,
+// not an arrow wrapper, so no extra function body exists that tests would
+// have to call.
 const defaultDeps: OllamaModelsDeps = {
   fetch: globalThis.fetch,
 };
 
 /** The locked provider config; the refresh swap re-registers the same shape. */
 const buildProviderConfig = (models: ProviderModelConfig[]): ProviderConfig => ({
-  // Display name stays "ollama", same as the models.json block it replaced.
+  // The display name matches the provider id.
   name: "ollama",
   baseUrl: `${DEFAULT_DAEMON_BASE_URL}/v1`,
-  // Literal dummy key (Decision #2): it satisfies pi's credential gates; the
+  // Literal dummy key: it satisfies pi's credential gates; the
   // daemon does the real auth when it proxies.
   apiKey: "ollama",
   api: "openai-completions",
@@ -98,8 +100,8 @@ export const refreshCatalog = async (
     // keeps the registered seed catalog, and the re-register would be a
     // no-op anyway.
     if (failed < SEED_MODEL_IDS.length && models.length > 0) {
-      // Re-registration validates the RAW config before merging (verified at
-      // 0.85.1), so the full locked config is passed — not just the models.
+      // pi validates the incoming config before merging it with the previous
+      // registration, so the full locked config is passed — not just the models.
       pi.registerProvider("ollama", buildProviderConfig(models));
     }
     if (!ctx.hasUI) return;

@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { SEED_MODEL_IDS, SEED_MODELS } from "./seed.ts";
 
-/** The locked compat block (plan Decision #10), adopted verbatim from upstream. */
+/** The explicit compat block every seed entry carries. */
 const COMPAT = {
   supportsDeveloperRole: false,
   supportsReasoningEffort: true,
