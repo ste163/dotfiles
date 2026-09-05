@@ -1,8 +1,9 @@
 # ollama-models — plan
 
-Status: approved design. Not yet implemented. No code written. The gating
-parallel extension (plan-mode) has landed; execution is unblocked and the
-Phase 0 pin bump is now a solo change.
+Status: implemented 2026-09-05. Phases 0-3 done; Phase 4 smoke done live
+except the daemon-stopped check (unit-covered; see Implementation record).
+The plan-mode gate landed before execution; the Phase 0 pin bump went in
+solo.
 
 Everything below was verified live or read from source on 2026-08-28 against
 pi 0.84.3 and pi-ollama-cloud 0.9.0, then re-checked on 2026-09-05 against
@@ -90,10 +91,13 @@ Consequence: the extension is seed-driven, not discovery-driven.
 
 ### refreshModels contract (source + two reference implementations)
 
-- pi calls it on startup, `/model` open, and `pi update --models`
-  (model-runtime.js). Startup = restore phase at `ModelRuntime.create`, then
-  a background network refresh after TUI init in interactive mode. `/model`
-  open and `pi update --models` refresh directly, both capped at 15s.
+- pi calls it on startup and `/model` open (model-runtime.js). Startup =
+  restore phase at `ModelRuntime.create`, then a background network refresh
+  after TUI init in interactive mode; rpc mode refreshes at startup too
+  (`pi --mode rpc` is the headless trigger). `/model` open refreshes
+  directly, capped at 15s. 0.85.1 correction: `pi update --models` builds a
+  bare ModelRuntime without loading extensions, so it never reaches
+  extension refreshModels — see Implementation record.
 - Two phases per refresh: restore (`allowNetwork:false`, before credential
   resolution) then network (`allowNetwork:true`, only when a credential
   resolves).
@@ -134,7 +138,7 @@ architecture we adopt is unchanged from v0.9.0.
 | 5   | Vision from capabilities                           | gemma4 + qwen3.5 gain input `["text","image"]` — never had it in models.json.                                                                                                                                                                                                                                                                                                                               |
 | 6   | Thinking map `{off: null, max: "max"}` on all four | off hidden = "reasoning always on" (locked in the settings session); max verified live. Mid levels stay default-mapped pass-through — probes showed they may not produce visible reasoning; treat them as user choice, not guaranteed thinking. defaultThinkingLevel "max" stays in settings.json. Upstream v0.10.0's glm-5.3 entry maps low/medium/xhigh with `off: "none"`; we deliberately keep our map. |
 | 7   | Per-model fallback, never throw                    | Divergence from upstream: a failed /api/show for one model keeps that model's seed/stored values; the refresh still returns all four. Daemon fully down → network phase returns seed merge and advances checkedAt (cooldown applies). Daemon-down is a normal state, not a surfaced error.                                                                                                                  |
-| 8   | 4h refresh cooldown, force bypass                  | Mirrors upstream and pi's remote-catalog-provider; `pi update --models` forces.                                                                                                                                                                                                                                                                                                                             |
+| 8   | 4h refresh cooldown, force bypass                  | Mirrors upstream and pi's remote-catalog-provider. The callback honors `force` per the pi-ai contract (unit-tested), but at 0.85.1 `pi update --models` does not load extensions, so the bypass is not live-triggered.                                                                                                                                                                                      |
 | 9   | Zero cost entries                                  | No pricing. `cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0}` placeholder (required field).                                                                                                                                                                                                                                                                                                        |
 | 10  | Compat block from upstream `buildCompat()`         | Listed below, adopted verbatim.                                                                                                                                                                                                                                                                                                                                                                             |
 | 11  | models.json ollama block deleted at cutover        | Extension replaces it; file left as `{"providers":{}}`. models.json stays machine-local (unchanged repo policy).                                                                                                                                                                                                                                                                                            |
@@ -220,7 +224,9 @@ fetch serves canned /api/show responses; fake clock drives cooldown tests.
 
 - Daemon up: refresh persists; footer values match the seed table.
 - Daemon stopped: `/model` still lists all four (restore phase, seed/stored).
-- `pi update --models`: forced refresh bypasses cooldown.
+- `pi update --models`: forced refresh bypasses cooldown. (0.85.1 finding:
+  the command does not load extensions — unit-tested only; see the
+  Implementation record.)
 - glm-5.3:cloud at `/think max`: visible reasoning in session output.
 - Optional: image input on gemma4 through the daemon proxy.
 
@@ -274,4 +280,28 @@ Phase 0 → 1 → 2 → 3 → 4. The parallel extension (plan-mode) has landed, 
 Phase 0 step 1 (the pin bump to 0.85.1) is a solo change to the shared
 package.json.
 
-Resume point: Phase 0, step 1.
+## Implementation record (2026-09-05)
+
+- Phases 0-3 executed as planned. All ten extension files sit at 100% line,
+  branch, and function coverage; the repo-wide gate stays red only on the
+  pre-existing plan-mode debt.
+- Open question 1 answered live: the literal apiKey resolves as a
+  credential, the network phase runs, and publish persisted the ollama entry
+  to models-store.json (triggered headlessly with `pi --mode rpc`; the four
+  entries match the seed table, with gemma4/qwen3.5 gaining image input from
+  the live capabilities).
+- Cooldown verified live: a second startup inside the window re-fetched
+  nothing and left checkedAt untouched.
+- Thinking verified live: glm-5.3:cloud at --thinking max streams a thinking
+  block (pi reads it through OPENAI_COMPLETIONS_REASONING_FIELDS).
+- 0.85.1 correction: `pi update --models` builds a bare ModelRuntime and
+  does not load extensions, so it never calls extension refreshModels. The
+  live triggers are startup (interactive and rpc) and /model open; the force
+  bypass stays in the callback per the pi-ai contract and is unit-tested.
+- Not verified live: the daemon-stopped /model check (that would stop the
+  user's daemon mid-session). Covered by unit tests: a fully down daemon
+  returns the fallback catalog and advances checkedAt.
+- models.json backup kept at ~/.pi/agent/models.json.pre-ollama-extension.bak
+  before the cutover deleted the ollama block.
+
+Resume point: none — implementation complete.
