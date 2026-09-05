@@ -3,14 +3,14 @@
  *
  * POST /api/show needs no auth: the daemon attaches the cloud sign-in when it
  * proxies (plan Decision #2). Everything here is fail-soft — a failed request
- * resolves to { ok: false } and the caller keeps that model's fallback entry
- * (plan Decision #7). Nothing in this module throws.
+ * resolves to { ok: false } and the caller keeps that model's fallback entry.
+ * Nothing in this module throws.
  */
 
 /** Daemon root; the OpenAI provider endpoint is `${DEFAULT_DAEMON_BASE_URL}/v1`. */
 export const DEFAULT_DAEMON_BASE_URL = "http://127.0.0.1:11434";
 
-/** Per-request timeout; pi's /model picker aborts the whole refresh after 15s. */
+/** Per-request timeout; nothing in the extension aborts a fetch batch early. */
 export const FETCH_TIMEOUT_MS = 10000;
 
 /** The slice of a POST /api/show response the extension reads. */
@@ -20,43 +20,32 @@ export interface ShowResponse {
 }
 
 /**
- * Fail-soft result. ok:false covers a non-ok status, a network error, a
- * timeout, and an abort — callers never need to distinguish them.
+ * Fail-soft result. ok:false covers a non-ok status, a network error, and a
+ * timeout — callers never need to distinguish them.
  */
 export type ShowResult = { ok: true; data: ShowResponse } | { ok: false };
 
 /**
  * Host dependencies, injected per the PlanModeDeps rule (plan Decision #13):
- * tests pass fakes, so no unit test touches the real network or clock.
+ * tests pass fakes, so no unit test touches the real network. The fake clock
+ * died with the cooldown; only fetch remains.
  */
 export interface OllamaModelsDeps {
   fetch: (input: string, init?: RequestInit) => Promise<Response>;
-  now(): number;
 }
 
 /**
- * Fetch one model's /api/show document. The timeout and the caller's signal
- * both feed the same controller; any failure resolves to { ok: false }.
+ * Fetch one model's /api/show document. The timeout aborts a hanging request;
+ * any failure resolves to { ok: false }.
  */
 export async function fetchShow(
   modelId: string,
   baseUrl: string,
   deps: OllamaModelsDeps,
-  signal: AbortSignal,
   timeoutMs: number,
 ): Promise<ShowResult> {
   const controller = new AbortController();
-  const onExternalAbort = (): void => controller.abort();
-  if (signal.aborted) {
-    controller.abort();
-  } else {
-    signal.addEventListener("abort", onExternalAbort, { once: true });
-  }
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  // No finally block on purpose: V8 carves an uncoverable "catch threw"
-  // basic block between catch and finally, which the 100% branch gate
-  // counts as a permanent miss. Cleanup runs once after the try/catch
-  // instead — the catch path is non-throwing, so both paths reach it.
   let result: ShowResult;
   try {
     const res = await deps.fetch(`${baseUrl}/api/show`, {
@@ -72,7 +61,6 @@ export async function fetchShow(
     result = { ok: false };
   }
   clearTimeout(timeout);
-  if (!signal.aborted) signal.removeEventListener("abort", onExternalAbort);
   return result;
 }
 

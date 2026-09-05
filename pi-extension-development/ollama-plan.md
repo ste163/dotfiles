@@ -305,3 +305,146 @@ package.json.
   before the cutover deleted the ollama block.
 
 Resume point: none — implementation complete.
+
+## Rework plan (2026-09-05): startup-only refresh — Option B
+
+Status: implemented 2026-09-05. R1-R3 executed as written; see the
+implementation record at the end of this section.
+
+### Why rework (user decision)
+
+The cooldown, persist, restore, and publish machinery mirrors upstream's
+internet-facing catalog. For a local daemon with four fixed models it is
+features without a need: restarting pi takes seconds, so fresh-on-every-start
+is enough. Two hard limits of the v1 design also surface:
+
+- `refreshModels` cannot pick its trigger. pi calls it on startup AND on
+  /model open, and the callback cannot tell them apart (no source field in
+  RefreshModelsContext — verified at 0.85.1).
+- `refreshModels` has no UI access, so the success/failure visuals the user
+  wants cannot come from it.
+
+New contract: fetch once per process start; show one message on success; show
+a warning visual on any failure so it can be investigated; seed values fill
+any gap. This also revises Decision #7: daemon-down now surfaces a visual
+(the silent-degradation stays — the seed catalog still serves).
+
+### Verified against pi 0.85.1 (rework)
+
+1. Runtime re-registration is sanctioned. After the load phase,
+   `pi.registerProvider` routes straight to `modelRuntime.registerProvider`
+   (runner.js bindCore: "takes effect immediately without requiring a
+   /reload"). Caveat: validation runs on the RAW incoming config before the
+   merge, so the swap must re-register the FULL locked config (name,
+   baseUrl, apiKey, api, models) — a `{models}`-only call fails validation.
+2. `session_start` fires in every mode (agent-session.js defaults to reason
+   "startup"; /reload emits reason "reload"; new/resume/fork carry their
+   own). pi awaits handlers sequentially, so the handler must return
+   synchronously — fire-and-forget is mandatory and guarantees startup is
+   never blocked. Handler throws are caught and shown as extension errors.
+3. `ctx.ui.notify(message, type?: "info" | "warning" | "error")` exists;
+   `ctx.hasUI` is true only in TUI and RPC, so headless modes stay silent.
+4. Models are process-lifetime state, so the reason filter is
+   `startup` | `reload` only: /new, /resume, /fork in the same process reuse
+   the already-fetched catalog. No repeated fetches, no message noise.
+5. With no refreshModels, pi's refresh cycles (startup background, /model
+   open, pi update --models) skip the ollama provider entirely.
+6. models-store.json becomes dead data for this extension: nothing reads it
+   (no restore) and nothing writes it. The ollama key is removed at cutover.
+7. fetchShow's external-signal parameter becomes dead code (nothing aborts a
+   batch now) — it is removed in the rework.
+
+### Design
+
+- `index.ts` registers the locked config, then subscribes
+  `pi.on("session_start", ...)`.
+- The handler filters reasons (`startup`/`reload`), then fire-and-forgets
+  `refreshCatalog(pi, ctx, deps)` — returns synchronously, never blocks.
+- `refreshCatalog` (exported for tests): four concurrent fetchShows →
+  assembleModels(SEED_MODELS, shows) → if any model fetched AND the list is
+  non-empty, re-register the full config with the merged list → messages:
+  - any fetch failed → warning:
+    `ollama-models: couldn't fetch N of 4 models from the daemon — using
+built-in values`
+  - all fetched but the list is empty (pathological no-tools responses) →
+    warning: `ollama-models: daemon returned no usable models — using built-in
+catalog`
+  - clean success → info: `ollama-models: fetched the latest model data
+from the daemon`
+  - Messages only when `ctx.hasUI`; everything wrapped in a top-level
+    try/catch (async-void must never reject) whose catch path shows a
+    warning: `ollama-models: catalog refresh failed`.
+- Re-register condition: `failed < SEED_MODEL_IDS.length && models.length > 0`
+  — a total failure never re-registers (the seed registration already
+  serves); a partial failure applies fresh values for the models that came
+  back.
+- `refreshCatalog` takes a structural ctx type
+  `{ hasUI: boolean; ui: { notify(...) } }` so tests need no full-interface
+  fake.
+- `ollama-api.ts`: fetchShow drops the external-signal parameter and the
+  listener plumbing; keeps the internal timeout, fail-soft semantics, and
+  the getContextLength divergence (undefined keeps the seed value).
+- Two rapid session_starts (e.g. /reload mid-fetch) race harmlessly: both
+  fetch, the later re-register wins, same data.
+
+### Files
+
+- Delete: `refresh.ts`, `refresh.spec.ts`
+- Simplify: `ollama-api.ts` + spec (drop signal param and its two
+  external-abort tests; keep ok / non-ok / reject / malformed / timeout and
+  the getContextLength trio)
+- Rewrite: `index.ts` + spec (registration lock, session_start wiring,
+  reason filter, refreshCatalog behavior table below)
+- Unchanged: `seed.ts`, `assemble.ts` + specs
+- Net: about 450 lines of source and spec removed; concepts drop from five
+  (restore/cooldown/persist/publish/refresh) to one (fetch at start)
+
+### Test matrix (rework)
+
+| Case                         | Expectation                                                       |
+| ---------------------------- | ----------------------------------------------------------------- |
+| registration                 | full locked config; models === SEED_MODELS                        |
+| session_start wiring         | handler returns undefined (non-blocking); fire-and-forget settles |
+| reason "new"/"resume"/"fork" | no fetch, no re-register, no message                              |
+| all four fetches ok          | re-register with live values; info message                        |
+| hasUI false                  | re-register happens; no messages                                  |
+| one fetch fails              | re-register merges seed for the failed id; warning "1 of 4"       |
+| all fetches fail             | no re-register; warning "4 of 4"                                  |
+| all responses lack tools     | no re-register; "no usable models" warning                        |
+| registerProvider throws      | warning "catalog refresh failed" (catch path)                     |
+
+### Phases
+
+R1 — code: delete/simplify/rewrite per Files; checklist green; every
+ollama-models file back at 100% coverage.
+R2 — cutover + live smoke: new pi session shows the info message and lists
+the four models; /reload re-fetches; /model shows no refresh activity;
+remove the dead ollama key from models-store.json (backup first).
+R3 — docs: README trigger table and messages; plan implementation record
+for the rework.
+
+### Implementation record (rework, 2026-09-05)
+
+- R1: refresh.ts and refresh.spec.ts deleted; ollama-api.ts simplified
+  (fetchShow lost the external-signal parameter and listener plumbing; the
+  deps interface shrank to { fetch } — the fake clock died with the
+  cooldown); index.ts rewritten around the session_start handler and the
+  exported refreshCatalog. 86/86 tests; every ollama-models file at 100%
+  line, branch, and function coverage; typecheck/lint/format clean.
+- R2: live smoke passed. `pi --mode rpc` startup produced the exact info
+  message in the RPC stream ("ollama-models: fetched the latest model data
+  from the daemon", notifyType info), proving the session_start fetch,
+  swap, and notify end to end. The dead ollama key was removed from
+  models-store.json (backup at models-store.json.pre-rework.bak); the store
+  now holds only pi's own github-copilot entry and nothing writes to it
+  anymore. `pi --list-models` shows the four models from the registration
+  alone.
+- R3: README trigger table and messages updated (this pass); this record
+  written. Decision #7's silent-daemon-down stance is revised per the user:
+  failures now surface a warning visual, while the seed catalog still
+  serves.
+- Not verified live: the /reload re-fetch path (interactive-only command;
+  unit-tested via the reason filter) and a real daemon-down warning (would
+  stop the user's daemon mid-session; unit-tested).
+
+Resume point: none — rework complete.
