@@ -1,18 +1,16 @@
 /**
  * Seed catalog for the ollama-models extension.
  *
- * Seed-driven by design (plan Decision #3): the local daemon cannot enumerate
+ * Seed-driven by design: the local daemon cannot enumerate
  * cloud models (GET /api/tags and /v1/models return nothing), so the catalog
- * is fixed to the four `:cloud` ids below. The seed doubles as the
+ * is fixed to the `:cloud` ids below. The seed doubles as the
  * offline/first-launch fallback for refreshModels.
  *
- * All values verified against the live daemon on 2026-09-05 (POST /api/show
- * probes; see ollama-plan.md, "Current state").
  */
 
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 
-/** The four cloud-routed model ids the local daemon serves. */
+/** The cloud-routed model ids the local daemon serves. */
 export const SEED_MODEL_IDS = [
   "glm-5.3:cloud",
   "deepseek-v4-pro:cloud",
