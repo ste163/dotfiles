@@ -19,32 +19,43 @@
  * - Quoted text and `--grep`-style flags are masked before the patterns
  *   run, so `git commit -m "fix the grep hack"` and `git log --grep` never
  *   trip.
- * - Anything else matching a code-search pattern blocks with one message:
- *   the offending segments, then a self-correcting ladder naming the exact
- *   calls.
+ * - Anything else matching a code-search pattern blocks. The block message
+ *   rewrites the query as a real MCP call whenever the state is readable:
+ *   pi registers the server in ~/.pi/agent/mcp.json, and the server stores
+ *   one SQLite db per indexed project under ~/.cache/codebase-memory-mcp/,
+ *   named by dashing the repo root. Registered and indexed → "Try instead:"
+ *   with the extracted pattern and the real project name. Registered only →
+ *   index first. Neither → the full ladder. A naming mismatch degrades to
+ *   the index-first path, never to a wrong "ready" answer.
  *
  * Accepted leaks: `node -e`, `sh -c`, `awk`, `sed`, and command
  * substitution inside double quotes can hide file reads. This extension is
  * a speed bump against reflexive grep/rg/find, not a sandbox.
  *
- * The extension tracks no runtime state; the agent discovers the server's
- * state by walking the ladder.
+ * The extension tracks no runtime state; everything is derived from the
+ * filesystem at block time.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 /** Filesystem access the extension needs (the PlanModeDeps pattern). */
 export interface CodebaseMemoryMcpEnforcerDeps {
   existsSync(path: string): boolean;
+  /** Only called for paths existsSync accepted; keeps the real dep throw-free. */
+  readFile(path: string): string;
   cwd(): string;
+  homeDir(): string;
 }
 
 /** Default deps: the real filesystem. A plain immutable value. */
 export const defaultDeps: CodebaseMemoryMcpEnforcerDeps = {
   existsSync,
+  readFile: (path) => readFileSync(path, "utf8"),
   cwd: () => process.cwd(),
+  homeDir: () => homedir(),
 };
 
 /** Walk up from `dir` looking for a `.git` directory — `dir` plus up to 16 parents, 17 directories at most. */
@@ -202,20 +213,164 @@ const isCodeSearchSegment = (segment: string): boolean => {
   return true;
 };
 
-/** The single block message: the offending segments, then a self-correcting ladder with the real calls. */
-const blockMessage = (gitRoot: string, violations: readonly string[]): string =>
-  "MCP FIRST — code search blocked: " +
-  violations.map((segment) => "`" + segment + "`").join(", ") +
-  "\n\n" +
-  '1. Not connected?    mcp({ connect: "codebase-memory-mcp" })\n' +
-  '2. First time here?  mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "' +
+// The server names projects by dashing the repo root, so the project name
+// and its db file are derivable without touching the server. A naming
+// mismatch just yields "not indexed" — the safe fallback.
+const projectNameFor = (gitRoot: string): string => gitRoot.split("/").filter(Boolean).join("-");
+
+const mcpConfigPath = (homeDir: string): string => join(homeDir, ".pi/agent/mcp.json");
+
+const projectDbPath = (homeDir: string, gitRoot: string): string =>
+  join(homeDir, ".cache/codebase-memory-mcp", projectNameFor(gitRoot) + ".db");
+
+const parseJson = (raw: string): unknown | null => {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+/** mcp.json registers the server; its presence is the cheapest connected signal. */
+const isServerRegistered = (parsed: unknown): boolean => {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const servers = (parsed as Record<string, unknown>)["mcpServers"];
+  if (typeof servers !== "object" || servers === null) return false;
+  return "codebase-memory-mcp" in servers;
+};
+
+/** What the filesystem says about the MCP server for this repo. */
+export interface McpState {
+  registered: boolean;
+  indexed: boolean;
+}
+
+const mcpState = (gitRoot: string, deps: CodebaseMemoryMcpEnforcerDeps): McpState => {
+  const configPath = mcpConfigPath(deps.homeDir());
+  const registered =
+    deps.existsSync(configPath) && isServerRegistered(parseJson(deps.readFile(configPath)));
+  return { registered, indexed: deps.existsSync(projectDbPath(deps.homeDir(), gitRoot)) };
+};
+
+/** Strip one layer of matching quotes; an unbalanced opener means the pattern had spaces, so fall back. */
+const quotable = (token: string): string => {
+  const opener = token[0];
+  if (opener !== "'" && opener !== '"') return token;
+  return token.length > 1 && token[token.length - 1] === opener ? token.slice(1, -1) : "...";
+};
+
+/** The best-effort search pattern from a blocked segment, for the rewrite line. */
+const searchPattern = (segment: string): string => {
+  const tokens = segment.trim().split(/\s+/);
+  const tail = searchFamilyTail(tokens);
+  if (tail) {
+    const pattern = tail.find((token) => !token.startsWith("-"));
+    return pattern === undefined ? "..." : quotable(pattern);
+  }
+  const nameFlagIndex = tokens.findIndex((token) => token === "-name" || token === "-iname");
+  const name = nameFlagIndex === -1 ? undefined : tokens[nameFlagIndex + 1];
+  return name === undefined ? "..." : quotable(name);
+};
+
+const searchCallLine = (project: string, pattern: string): string =>
+  'mcp({ tool: "codebase-memory-mcp_search_code", args: { pattern: "' +
+  pattern +
+  '", project: "' +
+  project +
+  '", mode: "files" } })';
+
+const indexCallLine = (gitRoot: string): string =>
+  'mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "' +
   gitRoot +
-  '", mode: "fast" } })\n' +
-  '3. Project name?     mcp({ tool: "codebase-memory-mcp_list_projects" })\n' +
-  '4. Search:           mcp({ tool: "codebase-memory-mcp_search_code", args: { pattern: "...", project: "<name>", mode: "files" } })\n' +
-  "5. Still failing?    The server is unreachable. Inform the user and stop this line of work.\n\n" +
+  '", mode: "fast" } })';
+
+const blockHeader = (violations: readonly string[]): string =>
+  "MCP FIRST — code search blocked: " + violations.map((segment) => "`" + segment + "`").join(", ");
+
+const EXEMPTIONS =
   "Legal without the server: pipe filters over command output (e.g. `npm test | grep fail`) " +
   "and grep-family over named docs/config files.";
+
+const UNREACHABLE = "Inform the user and stop this line of work.";
+
+/** The block message: a ready-made rewrite when the state is readable, the ladder when it is not. */
+const blockMessage = (gitRoot: string, violations: readonly string[], state: McpState): string => {
+  const project = projectNameFor(gitRoot);
+  const header = blockHeader(violations);
+  if (state.registered && state.indexed) {
+    const rewrites = violations.map((segment) => searchCallLine(project, searchPattern(segment)));
+    return (
+      header +
+      "\n\nTry instead:\n" +
+      rewrites.join("\n") +
+      "\n\nIf those fail, the server is unreachable. " +
+      UNREACHABLE +
+      "\n\n" +
+      EXEMPTIONS
+    );
+  }
+  if (state.registered) {
+    const rewrites = violations.map((segment) => searchCallLine(project, searchPattern(segment)));
+    return (
+      header +
+      "\n\nIndex the repo, then search:\n" +
+      indexCallLine(gitRoot) +
+      "\n" +
+      rewrites.join("\n") +
+      "\n\nIf those fail, the server is unreachable. " +
+      UNREACHABLE +
+      "\n\n" +
+      EXEMPTIONS
+    );
+  }
+  const first = violations[0] as string;
+  return (
+    header +
+    "\n\n" +
+    '1. Not connected?    mcp({ connect: "codebase-memory-mcp" })\n' +
+    '2. First time here?  mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "' +
+    gitRoot +
+    '", mode: "fast" } })\n' +
+    '3. Project name?     mcp({ tool: "codebase-memory-mcp_list_projects" })\n' +
+    "4. Search:           " +
+    searchCallLine("<name>", searchPattern(first)) +
+    "\n" +
+    "5. Still failing?    The server is unreachable. " +
+    UNREACHABLE +
+    "\n\n" +
+    EXEMPTIONS
+  );
+};
+
+/** The pre-turn reminder: report the state, then the decision rule. */
+const reminderMessage = (gitRoot: string, state: McpState): string => {
+  const project = projectNameFor(gitRoot);
+  const rule =
+    " Know the path → read. Filtering output or grepping named docs/config files → bash grep is legal.";
+  if (state.registered && state.indexed) {
+    return (
+      'MCP READY — project "' +
+      project +
+      "\" is indexed. Don't know the path → " +
+      searchCallLine(project, "...") +
+      "." +
+      rule
+    );
+  }
+  if (state.registered) {
+    return (
+      "MCP COLD — the server is connected but this repo is not indexed; code grep will block. Index first: " +
+      indexCallLine(gitRoot) +
+      "." +
+      rule
+    );
+  }
+  return (
+    "MCP FIRST — codebase-memory-mcp is not registered; code grep will block. Connect: " +
+    'mcp({ connect: "codebase-memory-mcp" }).' +
+    rule
+  );
+};
 
 export const createCodebaseMemoryMcpEnforcerExtension = (
   pi: ExtensionAPI,
@@ -231,21 +386,17 @@ export const createCodebaseMemoryMcpEnforcerExtension = (
     const gitRoot = findGitRoot(deps.cwd(), deps);
     if (!gitRoot) return; // not in a git repo, allow
 
-    return { block: true, reason: blockMessage(gitRoot, violations) };
+    return { block: true, reason: blockMessage(gitRoot, violations, mcpState(gitRoot, deps)) };
   });
 
-  // Pre-turn MCP reminder (fights context decay)
+  // Pre-turn reminder (fights context decay)
   pi.on("before_agent_start", (event) => {
-    if (!findGitRoot(deps.cwd(), deps)) return; // not in a git repo, no reminder needed
-
-    const reminder =
-      'MCP FIRST: In git repos, search code with mcp({ tool: "codebase-memory-mcp_search_code", ' +
-      'args: { pattern: "...", project: "<name>", mode: "files" } }) — not grep/rg. ' +
-      "Pipe filters over command output and grep-family over named docs/config files are legal.";
+    const gitRoot = findGitRoot(deps.cwd(), deps);
+    if (!gitRoot) return; // not in a git repo, no reminder needed
 
     // Prepend, not append — keeps it at top of context
     return {
-      systemPrompt: reminder + "\n\n" + event.systemPrompt,
+      systemPrompt: reminderMessage(gitRoot, mcpState(gitRoot, deps)) + "\n\n" + event.systemPrompt,
     };
   });
 };
