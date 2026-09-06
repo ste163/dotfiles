@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-exclude=\"node_modules/**\" --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 \"**/*.spec.ts\"",
+    "test": "node --experimental-config-file=node.config.json --test --experimental-strip-types --experimental-test-coverage --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100 \"**/*.spec.ts\"",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint .",
     "format": "oxfmt --write .",

@@ -19,6 +19,9 @@ fallback for code search.
 Exception: reading a file whose path you already know (from MCP results or
 user mention) — read/read_symbol is fine, no MCP call needed first.
 
+## Never commit
+You will never use git commit or git push. You make code updates, but I am the reviewer.
+
 ## No emojis in code
 
 Never put emojis in code, strings, comments, or commit messages. Use plain
@@ -35,3 +38,4 @@ expansion hide dotfiles, and this repo keeps real config in hidden files
 Always write prose in the `simple-english` skill style: ASD-STE100 Simplified
 Technical English, pragmatic mode. The full rule catalog is in
 `.pi/skills/simple-english/SKILL.md`.
+The only addition to this is be concise.

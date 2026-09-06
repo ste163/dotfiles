@@ -1,0 +1,5 @@
+{
+  "nodeOptions": {
+    "test-coverage-exclude": ["**/*.spec.ts", "node_modules/**"]
+  }
+}
