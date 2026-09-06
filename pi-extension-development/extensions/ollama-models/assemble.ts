@@ -1,88 +1,76 @@
 /**
  * Assembly: a live /api/show document -> a catalog entry.
  *
- * Every model's data comes from the show response — context window from
+ * Every entry field comes from the show response — context window from
  * model_info, vision and thinking from capabilities. There is no fallback
  * layer: a model the daemon cannot describe is dropped, not reconstructed.
- * A show response without the "tools" capability is unusable — pi is a
- * tool-calling agent — and so is one without a positive context length.
+ * A show response without the "tools" capability is unusable (pi is a
+ * tool-calling agent), and so is one without a positive context length.
  */
 
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { getContextLength, type ShowResponse } from "./ollama-api.ts";
 
 /**
- * Explicit OpenAI-compat block so behavior does not depend on pi's
- * auto-detection from the provider name or baseUrl. Every flag states the
- * daemon's actual wire behavior.
+ * Explicit compatibility block so behavior does not depend on pi's
+ * auto-detection from the provider name or baseUrl.
  */
-const buildCompat = (): ProviderModelConfig["compat"] => ({
-  // Ollama serves the "system" role, not "developer".
-  supportsDeveloperRole: false,
-  // reasoning_effort is honored through the local daemon ("max" verified live).
-  supportsReasoningEffort: true,
-  // The "store" field is not supported.
+const buildCompatibility = (): ProviderModelConfig["compat"] => ({
+  supportsDeveloperRole: false, // Ollama serves the "system" role, not "developer".
+  supportsReasoningEffort: true, // reasoning_effort is honored through the local daemon.
   supportsStore: false,
-  // Ollama lists "max_tokens", not "max_completion_tokens".
   maxTokensField: "max_tokens",
-  // stream_options.include_usage is supported.
   supportsUsageInStreaming: true,
   requiresToolResultName: false,
   requiresAssistantAfterToolResult: false,
   requiresThinkingAsText: false,
   requiresReasoningContentOnAssistantMessages: false,
-  // reasoning_effort format ("max" produces visible reasoning through the daemon).
   thinkingFormat: "openai",
-  // Ollama has no tool_choice, so strict mode is unavailable.
-  supportsStrictMode: false,
+  supportsStrictMode: false, // Ollama has no tool_choice, so strict mode is unavailable.
   sendSessionAffinityHeaders: false,
   supportsLongCacheRetention: false,
   zaiToolStream: false,
 });
 
 /**
- * Build one catalog entry from a live show document. Returns undefined when
- * the daemon reports the model cannot serve pi (no tools) or gave no usable
- * context length — the caller drops it.
+ * Build the catalog entry for one model from its live show document.
+ * Returns an empty array when the daemon reports the model cannot serve pi
+ * (no tools, no positive context length).
  */
-export function assembleModel(
-  modelId: string,
-  show: ShowResponse,
-): ProviderModelConfig | undefined {
+export const assembleModel = (modelId: string, show: ShowResponse): ProviderModelConfig[] => {
   const capabilities = show.capabilities;
-  if (!capabilities?.includes("tools")) return;
+  if (!capabilities?.includes("tools")) return [];
   const contextWindow = getContextLength(show.model_info);
-  if (!contextWindow || contextWindow <= 0) return;
-  // The daemon reports thinking, so pi's controls map to "max": these
-  // models think by default ("off" is hidden) and "max" is the only level
-  // verified to produce visible reasoning.
+  if (contextWindow <= 0) return [];
+  // The daemon reports thinking: these models think by default ("off" is
+  // hidden) and "max" is the daemon's top level.
   const thinks = capabilities.includes("thinking");
-  return {
-    id: modelId,
-    name: modelId,
-    reasoning: thinks,
-    ...(thinks ? { thinkingLevelMap: { off: null, max: "max" } } : {}),
-    input: (capabilities.includes("vision") ? ["text", "image"] : ["text"]) as ("text" | "image")[],
-    // cost is a required field; this extension does not track pricing.
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow,
-    // /api/show exposes no max-output; 32768 is a safe cap under every context window.
-    maxTokens: 32768,
-    compat: buildCompat(),
-  };
-}
+  return [
+    {
+      id: modelId,
+      name: modelId,
+      reasoning: thinks,
+      ...(thinks ? { thinkingLevelMap: { off: null, max: "max" } } : {}),
+      input: (capabilities.includes("vision") ? ["text", "image"] : ["text"]) as (
+        | "text"
+        | "image"
+      )[],
+      // cost is a required field; this extension does not track pricing.
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow,
+      // /api/show exposes no max-output; 32768 is a safe cap under every context window.
+      maxTokens: 32768,
+      compat: buildCompatibility(),
+    },
+  ];
+};
 
-/**
- * Build the catalog from live show documents. Ids without a usable entry
- * are skipped; the caller reports them as missing.
- */
-export function assembleModels(
+/** Ids without a usable entry are skipped; the caller reports them as missing. */
+export const assembleModels = (
   modelIds: readonly string[],
   shows: ReadonlyMap<string, ShowResponse>,
-): ProviderModelConfig[] {
-  return modelIds.flatMap((id) => {
+): ProviderModelConfig[] =>
+  modelIds.flatMap((id) => {
     const show = shows.get(id);
-    if (!show) return [];
-    return assembleModel(id, show) ?? [];
+    return show ? assembleModel(id, show) : [];
   });
-}

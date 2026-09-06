@@ -4,8 +4,7 @@ import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { assembleModel, assembleModels } from "./assemble.ts";
 import type { ShowResponse } from "./ollama-api.ts";
 
-/** The explicit compat block every assembled entry carries. */
-const COMPAT: NonNullable<ProviderModelConfig["compat"]> = {
+const COMPATIBILITY: NonNullable<ProviderModelConfig["compat"]> = {
   supportsDeveloperRole: false,
   supportsReasoningEffort: true,
   supportsStore: false,
@@ -30,8 +29,19 @@ const show = (
   ...(capabilities !== undefined ? { capabilities } : {}),
 });
 
-test("assembleModel builds a full entry from live data", () => {
-  const entry = assembleModel(
+test("drops a show without tools or without any capabilities", () => {
+  assert.deepEqual(assembleModel("m", show(1024, ["completion", "thinking"])), []);
+  assert.deepEqual(assembleModel("m", show(1024, undefined)), []);
+});
+
+test("drops a show without a usable context length", () => {
+  assert.deepEqual(assembleModel("m", show(undefined, ["completion", "tools"])), []);
+  assert.deepEqual(assembleModel("m", show(0, ["completion", "tools"])), []);
+  assert.deepEqual(assembleModel("m", show(-1, ["completion", "tools"])), []);
+});
+
+test("builds a full entry from a thinking, vision, tools show", () => {
+  const [entry] = assembleModel(
     "m:cloud",
     show(262144, ["completion", "thinking", "tools", "vision"]),
   );
@@ -44,25 +54,15 @@ test("assembleModel builds a full entry from live data", () => {
   assert.equal(entry.contextWindow, 262144);
   assert.deepEqual(entry.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   assert.equal(entry.maxTokens, 32768);
-  assert.deepEqual(entry.compat, COMPAT);
+  assert.deepEqual(entry.compat, COMPATIBILITY);
 });
 
-test("assembleModel omits the thinking map for a no-thinking, no-vision model", () => {
-  const entry = assembleModel("m", show(8192, ["completion", "tools"]));
+test("omits the thinking map for a no-thinking, no-vision show", () => {
+  const [entry] = assembleModel("m", show(8192, ["completion", "tools"]));
   assert.ok(entry);
   assert.equal(entry.reasoning, false);
   assert.deepEqual(entry.input, ["text"]);
   assert.ok(!("thinkingLevelMap" in entry));
-});
-
-test("assembleModel drops models the daemon cannot serve pi with", () => {
-  // No tools capability — twice, including no capabilities at all.
-  assert.equal(assembleModel("m", show(1024, ["completion", "thinking"])), undefined);
-  assert.equal(assembleModel("m", show(1024, undefined)), undefined);
-  // No usable context length.
-  assert.equal(assembleModel("m", show(undefined, ["completion", "tools"])), undefined);
-  assert.equal(assembleModel("m", show(0, ["completion", "tools"])), undefined);
-  assert.equal(assembleModel("m", show(-1, ["completion", "tools"])), undefined);
 });
 
 test("assembleModels keeps only usable ids", () => {

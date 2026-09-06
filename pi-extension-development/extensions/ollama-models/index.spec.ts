@@ -96,9 +96,55 @@ const sessionStartHandler = (handlers: Map<string, SessionStartHandler>): Sessio
   return handler;
 };
 
-// --- Registration ---
+// --- fetchCatalog ---
 
-test("a live catalog registers the provider with the config-derived endpoint", async () => {
+test("reports unusable ids by name", async () => {
+  const responses = allOk(888888);
+  const dropped = CONFIG.models[0];
+  assert.ok(dropped); // 404: the serving fetch has no canned response
+  delete responses[dropped];
+  const { deps } = servingDeps(responses);
+  const outcome = await fetchCatalog(deps);
+  assert.equal(outcome.models.length, CONFIG.models.length - 1);
+  assert.deepEqual(outcome.missing, [dropped]);
+});
+
+test("fetches every configured id with none missing", async () => {
+  const { deps, calls } = servingDeps(allOk(777777));
+  const outcome = await fetchCatalog(deps);
+  assert.deepEqual(calls, [...CONFIG.models]);
+  assert.equal(outcome.models.length, CONFIG.models.length);
+  assert.ok(outcome.models.every((model) => model.contextWindow === 777777));
+  assert.deepEqual(outcome.missing, []);
+});
+
+// --- createOllamaModelsExtension ---
+
+test("a dead daemon fails the load and registers nothing", async () => {
+  const { pi, registrations, handlers } = createFakePi();
+  const { deps } = servingDeps({}); // every id answers 404
+  await assert.rejects(createOllamaModelsExtension(pi, deps), /no usable models/);
+  assert.equal(registrations.length, 0);
+  assert.equal(handlers.size, 0); // no report handler survives a failed load
+});
+
+test("tools-less responses fail the load the same way", async () => {
+  const { pi, registrations } = createFakePi();
+  const responses = Object.fromEntries(
+    CONFIG.models.map((id) => [id, okShow(999, ["completion"])]),
+  );
+  const { deps } = servingDeps(responses);
+  await assert.rejects(createOllamaModelsExtension(pi, deps), /no usable models/);
+  assert.equal(registrations.length, 0);
+});
+
+test("a registration rejection propagates as a load failure", async () => {
+  const { pi } = createFakePi({ failAfter: 0 });
+  const { deps } = servingDeps(allOk(4096));
+  await assert.rejects(createOllamaModelsExtension(pi, deps), /register rejected/);
+});
+
+test("a live catalog registers the provider; the default export does the same", async () => {
   const { pi, registrations, handlers } = createFakePi();
   const { deps } = servingDeps(allOk(4096));
   await createOllamaModelsExtension(pi, deps);
@@ -116,82 +162,37 @@ test("a live catalog registers the provider with the config-derived endpoint", a
   const models = config.models;
   assert.ok(models);
   assert.equal(models.length, CONFIG.models.length);
-  assert.ok(models.every((m) => m.contextWindow === 4096));
+  assert.ok(models.every((model) => model.contextWindow === 4096));
   assert.ok(handlers.has("session_start"));
-});
-
-test("the default export is the same registerer", async () => {
-  const { pi, registrations } = createFakePi();
-  const { deps } = servingDeps(allOk(4096));
-  await ollamaModelsExtension(pi, deps);
-  assert.equal(registrations.length, 1);
-});
-
-// --- fetchCatalog ---
-
-test("fetchCatalog fetches every configured id and reports none missing", async () => {
-  const { deps, calls } = servingDeps(allOk(777777));
-  const outcome = await fetchCatalog(deps);
-  assert.deepEqual(calls, [...CONFIG.models]);
-  assert.equal(outcome.models.length, CONFIG.models.length);
-  assert.ok(outcome.models.every((m) => m.contextWindow === 777777));
-  assert.deepEqual(outcome.missing, []);
-});
-
-test("fetchCatalog reports unusable ids by name", async () => {
-  const responses = allOk(888888);
-  const dropped = CONFIG.models[0];
-  assert.ok(dropped); // 404: the serving fetch has no canned response
-  delete responses[dropped];
-  const { deps } = servingDeps(responses);
-  const outcome = await fetchCatalog(deps);
-  assert.equal(outcome.models.length, CONFIG.models.length - 1);
-  assert.deepEqual(outcome.missing, [dropped]);
+  const { pi: secondPi, registrations: secondRegistrations } = createFakePi();
+  await ollamaModelsExtension(secondPi, deps);
+  assert.equal(secondRegistrations.length, 1);
 });
 
 // --- session_start reporting ---
 
-test("a startup session_start reports the fetched catalog", async () => {
-  const { pi, handlers } = createFakePi();
-  const { deps } = servingDeps(allOk(4096));
-  const { ctx, notifications } = createContext(true);
-  await createOllamaModelsExtension(pi, deps);
-  sessionStartHandler(handlers)(
-    { type: "session_start", reason: "startup" },
-    ctx as unknown as ExtensionContext,
-  );
-  assert.equal(notifications.length, 1);
-  const notification = notifications[0];
-  assert.ok(notification);
-  assert.match(notification.message, /fetched the latest model data/);
-  assert.equal(notification.type, "info");
-});
-
-test("a reload session_start reports too", async () => {
-  const { pi, handlers } = createFakePi();
-  const { deps } = servingDeps(allOk(4096));
-  const { ctx, notifications } = createContext(true);
-  await createOllamaModelsExtension(pi, deps);
-  sessionStartHandler(handlers)(
-    { type: "session_start", reason: "reload" },
-    ctx as unknown as ExtensionContext,
-  );
-  assert.equal(notifications.length, 1);
-});
-
-test("in-process session starts (new/resume/fork) stay silent", async () => {
+test("startup and reload report; new/resume/fork stay silent", async () => {
   const { pi, handlers } = createFakePi();
   const { deps } = servingDeps(allOk(4096));
   const { ctx, notifications } = createContext(true);
   await createOllamaModelsExtension(pi, deps);
   const handler = sessionStartHandler(handlers);
-  for (const reason of ["new", "resume", "fork"] as const) {
+  const fire = (reason: "startup" | "reload" | "new" | "resume" | "fork") =>
     handler({ type: "session_start", reason }, ctx as unknown as ExtensionContext);
-  }
-  assert.equal(notifications.length, 0);
+  fire("startup");
+  fire("reload");
+  assert.equal(notifications.length, 2);
+  const first = notifications[0];
+  assert.ok(first);
+  assert.match(first.message, /fetched the latest model data/);
+  assert.equal(first.type, "info");
+  fire("new");
+  fire("resume");
+  fire("fork");
+  assert.equal(notifications.length, 2);
 });
 
-test("headless (hasUI false): no messages", async () => {
+test("headless (hasUI false) sends no messages", async () => {
   const { pi, handlers } = createFakePi();
   const { deps } = servingDeps(allOk(4096));
   const { ctx, notifications } = createContext(false);
@@ -203,7 +204,7 @@ test("headless (hasUI false): no messages", async () => {
   assert.equal(notifications.length, 0);
 });
 
-// --- failure modes ---
+// --- partial catalog ---
 
 test("a partial catalog registers the survivors and warns naming the missing id", async () => {
   const { pi, registrations, handlers } = createFakePi();
@@ -218,7 +219,7 @@ test("a partial catalog registers the survivors and warns naming the missing id"
   const models = registrations[0]?.config.models;
   assert.ok(models);
   assert.equal(models.length, CONFIG.models.length - 1);
-  assert.ok(models.every((m) => m.contextWindow === 888888));
+  assert.ok(models.every((model) => model.contextWindow === 888888));
   sessionStartHandler(handlers)(
     { type: "session_start", reason: "startup" },
     ctx as unknown as ExtensionContext,
@@ -231,27 +232,4 @@ test("a partial catalog registers the survivors and warns naming the missing id"
     `ollama-models: couldn't register 1 of ${CONFIG.models.length} models from the daemon: ${dropped}`,
   );
   assert.equal(notification.type, "warning");
-});
-
-test("a dead daemon fails the load loudly and registers nothing", async () => {
-  const { pi, registrations, handlers } = createFakePi();
-  const { deps } = servingDeps({}); // every id answers 404
-  await assert.rejects(createOllamaModelsExtension(pi, deps), /no usable models/);
-  assert.equal(registrations.length, 0);
-  assert.equal(handlers.size, 0); // no report handler survives a failed load
-});
-
-test("tools-less responses fail the load the same way", async () => {
-  const { pi, registrations } = createFakePi();
-  const responses: Record<string, CannedResponse> = {};
-  for (const id of CONFIG.models) responses[id] = okShow(999, ["completion"]);
-  const { deps } = servingDeps(responses);
-  await assert.rejects(createOllamaModelsExtension(pi, deps), /no usable models/);
-  assert.equal(registrations.length, 0);
-});
-
-test("a registration rejection propagates as a load failure", async () => {
-  const { pi } = createFakePi({ failAfter: 0 });
-  const { deps } = servingDeps(allOk(4096));
-  await assert.rejects(createOllamaModelsExtension(pi, deps), /register rejected/);
 });

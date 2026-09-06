@@ -1,13 +1,12 @@
 /**
  * Local daemon API client for the ollama-models extension.
  *
- * POST /api/show needs no auth: the daemon attaches the cloud sign-in when it
- * proxies. Everything here is fail-soft — a failed request resolves to
- * { ok: false } and the caller drops that model.
- * Nothing in this module throws.
+ * POST /api/show needs no auth — the daemon attaches the cloud sign-in when
+ * it proxies. Every request here is fail-soft: any failure resolves to
+ * { ok: false } and the caller drops the model. Nothing throws.
  */
 
-/** Per-request timeout; nothing in the extension aborts a fetch batch early. */
+/** Nothing in the extension aborts a fetch batch early; this is the only bound. */
 export const FETCH_TIMEOUT_MS = 10000;
 
 /** The slice of a POST /api/show response the extension reads. */
@@ -20,55 +19,43 @@ export interface ShowResponse {
  * Fail-soft result. ok:false covers a non-ok status, a network error, and a
  * timeout — callers never need to distinguish them.
  */
-export type ShowResult = { ok: true; data: ShowResponse } | { ok: false };
+type ShowResult = { ok: true; data: ShowResponse } | { ok: false };
 
-/**
- * Host dependencies, injected so tests pass fakes and no unit test touches
- * the real network.
- */
+/** Host dependencies, injected so tests pass fakes and no unit test touches the real network. */
 export interface OllamaModelsDeps {
   fetch: (input: string, init?: RequestInit) => Promise<Response>;
 }
 
-/**
- * Fetch one model's /api/show document. The timeout aborts a hanging request;
- * any failure resolves to { ok: false }.
- */
-export async function fetchShow(
+/** Fetch one model's /api/show document; a hanging request is aborted at the timeout. */
+export const fetchShow = async (
   modelId: string,
   baseUrl: string,
   deps: OllamaModelsDeps,
   timeoutMs: number,
-): Promise<ShowResult> {
+): Promise<ShowResult> => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let result: ShowResult;
-  try {
-    const res = await deps.fetch(`${baseUrl}/api/show`, {
+  const request = async (): Promise<ShowResult> => {
+    const response = await deps.fetch(`${baseUrl}/api/show`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: modelId }),
       signal: controller.signal,
     });
-    result = res.ok
-      ? { ok: true, data: JSON.parse(await res.text()) as ShowResponse }
+    return response.ok
+      ? { ok: true, data: JSON.parse(await response.text()) as ShowResponse }
       : { ok: false };
-  } catch {
-    result = { ok: false };
-  }
+  };
+  const result = await request().catch((): ShowResult => ({ ok: false }));
   clearTimeout(timeout);
   return result;
-}
+};
 
 /**
- * Find `<arch>.context_length` in a /api/show model_info block. Returns
- * undefined when no numeric key matches, so the caller drops the entry.
+ * Find `<arch>.context_length` in a /api/show model_info block; 0 when none
+ * matches. The caller drops non-positive lengths.
  */
-export function getContextLength(modelInfo: Record<string, unknown>): number | undefined {
-  for (const [key, value] of Object.entries(modelInfo)) {
-    if (key.endsWith(".context_length") && typeof value === "number") {
-      return value;
-    }
-  }
-  return undefined;
-}
+export const getContextLength = (modelInfo: Record<string, unknown>): number =>
+  Object.entries(modelInfo).flatMap(([key, value]) =>
+    key.endsWith(".context_length") && typeof value === "number" ? [value] : [],
+  )[0] ?? 0;
