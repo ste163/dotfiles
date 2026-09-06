@@ -1,7 +1,7 @@
 /**
  * Assembly: a live /api/show document -> a catalog entry.
  *
- * Every model datum comes from the show response — context window from
+ * Every model's data comes from the show response — context window from
  * model_info, vision and thinking from capabilities. There is no fallback
  * layer: a model the daemon cannot describe is dropped, not reconstructed.
  * A show response without the "tools" capability is unusable — pi is a
@@ -50,9 +50,9 @@ export function assembleModel(
   show: ShowResponse,
 ): ProviderModelConfig | undefined {
   const capabilities = show.capabilities;
-  if (!capabilities?.includes("tools")) return undefined;
+  if (!capabilities?.includes("tools")) return;
   const contextWindow = getContextLength(show.model_info);
-  if (contextWindow === undefined || contextWindow <= 0) return undefined;
+  if (!contextWindow || contextWindow <= 0) return;
   // The daemon reports thinking, so pi's controls map to "max": these
   // models think by default ("off" is hidden) and "max" is the only level
   // verified to produce visible reasoning.
@@ -82,7 +82,7 @@ export function assembleModels(
 ): ProviderModelConfig[] {
   return modelIds.flatMap((id) => {
     const show = shows.get(id);
-    if (show === undefined) return [];
+    if (!show) return [];
     return assembleModel(id, show) ?? [];
   });
 }

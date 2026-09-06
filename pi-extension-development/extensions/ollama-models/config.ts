@@ -1,8 +1,6 @@
 /**
- * Config for the ollama-models extension.
- *
  * config.json is pure intent: which models the daemon should serve, and
- * where the daemon lives. Every model datum (context window, vision,
+ * where the daemon lives. Every model's data (context window, vision,
  * thinking) comes from the live daemon — nothing is cached or mirrored
  * here. The file is author-owned, so validation is strict and throws at
  * load: a typo must stop the extension loudly, never silently drop data.
@@ -16,11 +14,6 @@ export interface OllamaConfig {
   readonly models: readonly string[];
 }
 
-/**
- * Validate the parsed config.json. Throws a precise message naming the
- * offending field; unknown fields are rejected so a typo cannot silently
- * disable a model.
- */
 export function validateConfig(raw: unknown): OllamaConfig {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new Error("ollama-models: config.json: expected a JSON object");
