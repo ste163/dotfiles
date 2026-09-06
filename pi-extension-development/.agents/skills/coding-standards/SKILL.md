@@ -32,6 +32,10 @@ description: TypeScript coding standards and testing conventions for this projec
   restructure code freely when it improves readability/testability.
 - **Optimize for readability and testability over brevity.** More verbose
   but clearer code is preferred over clever/compact code.
+- **No `undefined`** Use (!check) instead of (check === undefined). Never return `undefined`, just return empty
+- **Verbosity in naming** Do not shorten names like Compat for Compatibility. Use full names so it's easier to read.
+- **Do not use mutable data. Use functional programming.** Do not use `let` always use `const`. Use functions to get live data instead of mutations.
+- **Comments should explain concepts and the why not the code.** Code documents. A comment saying a `validate` function validates the passed in item that has type information is a pointless comment. The function's name and it's parameters explain that the function validates the argument. Do not have unnecessary comments.
 
 ## Testing
 

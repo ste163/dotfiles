@@ -4,7 +4,7 @@
   "defaultThinkingLevel": "max",
   "enableInstallTelemetry": false,
   "followUpMode": "one-at-a-time",
-  "lastChangelogVersion": "0.84.3",
+  "lastChangelogVersion": "0.85.1",
   "packages": [
     "npm:pi-mcp-adapter",
     "npm:@gotgenes/pi-permission-system",
