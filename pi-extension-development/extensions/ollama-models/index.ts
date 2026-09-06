@@ -2,35 +2,38 @@
  * ollama-models extension.
  *
  * Owns the "ollama" provider under its existing id, so settings.json and the
- * /model UX stay unchanged. Registers a seed catalog of the cloud-routed
- * models served by the local daemon, then fetches live metadata (context
- * window, capabilities) from POST /api/show once per pi process start and
- * swaps it in. No ollama.com, no API key, no new credentials — the daemon
- * attaches the cloud sign-in when it proxies.
+ * /model UX stay unchanged. config.json names the cloud-routed models the
+ * local daemon serves; every model datum (context window, capabilities)
+ * comes from the live daemon, fetched here at load. pi resolves the
+ * session's default model only after extensions load, and the default IS an
+ * ollama model — so the provider must exist by then, and the entry is
+ * async because the fetch is (pi awaits it). A daemon that yields no usable
+ * model fails the load loudly: a daily-driver provider that silently
+ * vanishes is worse than a visible failure. No ollama.com, no API key, no
+ * new credentials — the daemon attaches the cloud sign-in when it proxies.
  *
- * A session_start handler owns the fetch instead of pi's refreshModels
- * callback: that callback cannot tell a startup refresh from a /model-open
- * refresh and has no access to the UI, while the handler fires exactly where
- * we want (reasons "startup" and "reload" — models live for the process
- * lifetime, so /new, /resume, /fork reuse the already-fetched catalog) and
- * can tell the user what happened.
+ * The session_start handler only reports the outcome; it never fetches.
+ * The load-time fetch already ran, models live for the process lifetime,
+ * and /reload re-imports the module, which re-fetches on its own. Loading
+ * has no UI context, so the report waits for the first session_start
+ * (reasons "startup" and "reload" only — /new, /resume, /fork are in-process
+ * sessions that reuse the registered catalog, and a repeat message would
+ * be noise).
  */
 
 import type {
   ExtensionAPI,
-  ExtensionContext,
   ProviderConfig,
   ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
 import { assembleModels } from "./assemble.ts";
+import { CONFIG } from "./config.ts";
 import {
-  DEFAULT_DAEMON_BASE_URL,
   FETCH_TIMEOUT_MS,
   fetchShow,
   type OllamaModelsDeps,
   type ShowResponse,
 } from "./ollama-api.ts";
-import { SEED_MODEL_IDS, SEED_MODELS } from "./seed.ts";
 
 // Host dependencies, injectable so tests pass fakes. A builtin reference,
 // not an arrow wrapper, so no extra function body exists that tests would
@@ -39,11 +42,11 @@ const defaultDeps: OllamaModelsDeps = {
   fetch: globalThis.fetch,
 };
 
-/** The locked provider config; the refresh swap re-registers the same shape. */
+/** The provider config registered from live data; the endpoint derives from config. */
 const buildProviderConfig = (models: ProviderModelConfig[]): ProviderConfig => ({
   // The display name matches the provider id.
   name: "ollama",
-  baseUrl: `${DEFAULT_DAEMON_BASE_URL}/v1`,
+  baseUrl: `${CONFIG.baseUrl}/v1`,
   // Literal dummy key: it satisfies pi's credential gates; the
   // daemon does the real auth when it proxies.
   apiKey: "ollama",
@@ -51,84 +54,62 @@ const buildProviderConfig = (models: ProviderModelConfig[]): ProviderConfig => (
   models,
 });
 
-/** The ctx slice refreshCatalog needs; keeps the spec fakes minimal. */
-type NotifyContext = Pick<ExtensionContext, "hasUI"> & {
-  ui: Pick<ExtensionContext["ui"], "notify">;
-};
+/** The load-time fetch result: what registered and which ids went missing. */
+export interface CatalogOutcome {
+  models: ProviderModelConfig[];
+  missing: readonly string[];
+}
 
-/** Register the provider and subscribe the startup refresh. Testable entry. */
-export const createOllamaModelsExtension = (
-  pi: ExtensionAPI,
-  deps: OllamaModelsDeps = defaultDeps,
-): void => {
-  pi.registerProvider("ollama", buildProviderConfig(SEED_MODELS));
-  pi.on("session_start", (event, ctx) => {
-    // Only process starts (and /reload) fetch; sessions created inside the
-    // same process reuse the already-fetched catalog.
-    if (event.reason !== "startup" && event.reason !== "reload") return;
-    // Fire-and-forget: pi awaits session_start handlers sequentially, so
-    // return immediately — the fetch must never block session start.
-    void refreshCatalog(pi, ctx, deps);
-  });
+/**
+ * Fetch every configured model's live data and assemble the catalog. The
+ * daemon is the only data source: an id the daemon cannot describe comes
+ * back missing, never invented.
+ */
+export const fetchCatalog = async (deps: OllamaModelsDeps): Promise<CatalogOutcome> => {
+  const results = await Promise.all(
+    CONFIG.models.map(async (id) => {
+      const result = await fetchShow(id, CONFIG.baseUrl, deps, FETCH_TIMEOUT_MS);
+      return [id, result.ok ? result.data : undefined] as const;
+    }),
+  );
+  const shows = new Map<string, ShowResponse>();
+  for (const [id, data] of results) {
+    if (data !== undefined) shows.set(id, data);
+  }
+  const models = assembleModels(CONFIG.models, shows);
+  const registered = new Set(models.map((m) => m.id));
+  const missing = CONFIG.models.filter((id) => !registered.has(id));
+  return { models, missing };
 };
 
 /**
- * Fetch live metadata for all four models and swap the catalog in. Never
- * throws: it runs as async-void from the handler, so a rejection would be
- * unhandled.
+ * Register the ollama provider from live daemon data. Testable entry; the
+ * default export is this same function. Throws when no configured model is
+ * usable — pi surfaces the message as a failed extension load.
  */
-export const refreshCatalog = async (
+export const createOllamaModelsExtension = async (
   pi: ExtensionAPI,
-  ctx: NotifyContext,
-  deps: OllamaModelsDeps,
+  deps: OllamaModelsDeps = defaultDeps,
 ): Promise<void> => {
-  try {
-    const results = await Promise.all(
-      SEED_MODEL_IDS.map(async (id) => {
-        const result = await fetchShow(id, DEFAULT_DAEMON_BASE_URL, deps, FETCH_TIMEOUT_MS);
-        return [id, result.ok ? result.data : undefined] as const;
-      }),
+  const outcome = await fetchCatalog(deps);
+  if (outcome.models.length === 0) {
+    throw new Error(
+      "ollama-models: no usable models from the daemon — ollama provider not registered",
     );
-    const shows = new Map<string, ShowResponse>();
-    let failed = 0;
-    for (const [id, data] of results) {
-      if (data === undefined) failed++;
-      else shows.set(id, data);
-    }
-    const models = assembleModels(SEED_MODELS, shows);
-    // Apply the swap only when something new came back: a total failure
-    // keeps the registered seed catalog, and the re-register would be a
-    // no-op anyway.
-    if (failed < SEED_MODEL_IDS.length && models.length > 0) {
-      // pi validates the incoming config before merging it with the previous
-      // registration, so the full locked config is passed — not just the models.
-      pi.registerProvider("ollama", buildProviderConfig(models));
-    }
+  }
+  pi.registerProvider("ollama", buildProviderConfig(outcome.models));
+  pi.on("session_start", (event, ctx) => {
+    if (event.reason !== "startup" && event.reason !== "reload") return;
     if (!ctx.hasUI) return;
-    if (failed > 0) {
+    if (outcome.missing.length > 0) {
       ctx.ui.notify(
-        `ollama-models: couldn't fetch ${failed} of ${SEED_MODEL_IDS.length} models from the daemon — using built-in values`,
-        "warning",
-      );
-    } else if (models.length === 0) {
-      ctx.ui.notify(
-        "ollama-models: daemon returned no usable models — using built-in catalog",
+        `ollama-models: couldn't register ${outcome.missing.length} of ${CONFIG.models.length} models from the daemon: ${outcome.missing.join(", ")}`,
         "warning",
       );
     } else {
       ctx.ui.notify("ollama-models: fetched the latest model data from the daemon", "info");
     }
-  } catch {
-    // Defense in depth: fetchShow and assemble never throw; a re-register
-    // validation throw lands here and still surfaces a visual.
-    if (ctx.hasUI) {
-      ctx.ui.notify("ollama-models: catalog refresh failed", "warning");
-    }
-  }
+  });
 };
 
-const ollamaModelsExtension = (pi: ExtensionAPI): void => {
-  createOllamaModelsExtension(pi);
-};
-
-export default ollamaModelsExtension;
+export default createOllamaModelsExtension;

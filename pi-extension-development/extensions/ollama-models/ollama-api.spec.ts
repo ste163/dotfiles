@@ -1,12 +1,13 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
-  DEFAULT_DAEMON_BASE_URL,
   fetchShow,
   getContextLength,
   type OllamaModelsDeps,
   type ShowResponse,
 } from "./ollama-api.ts";
+
+const BASE_URL = "http://127.0.0.1:11434";
 
 const deps = (fetch: OllamaModelsDeps["fetch"]): OllamaModelsDeps => ({ fetch });
 
@@ -29,7 +30,7 @@ test("fetchShow returns parsed show data", async () => {
   };
   const result = await fetchShow(
     "glm-5.3:cloud",
-    DEFAULT_DAEMON_BASE_URL,
+    BASE_URL,
     deps((_url, init) => {
       calls.push({ url: _url, init });
       return Promise.resolve(jsonResponse(show));
@@ -46,7 +47,7 @@ test("fetchShow returns parsed show data", async () => {
 test("fetchShow fails soft on a non-ok status", async () => {
   const result = await fetchShow(
     "m",
-    DEFAULT_DAEMON_BASE_URL,
+    BASE_URL,
     deps(() => Promise.resolve(new Response("boom", { status: 500 }))),
     1000,
   );
@@ -56,7 +57,7 @@ test("fetchShow fails soft on a non-ok status", async () => {
 test("fetchShow fails soft when fetch rejects (daemon down)", async () => {
   const result = await fetchShow(
     "m",
-    DEFAULT_DAEMON_BASE_URL,
+    BASE_URL,
     deps(() => Promise.reject(new Error("ECONNREFUSED"))),
     1000,
   );
@@ -66,7 +67,7 @@ test("fetchShow fails soft when fetch rejects (daemon down)", async () => {
 test("fetchShow fails soft on a malformed JSON body", async () => {
   const result = await fetchShow(
     "m",
-    DEFAULT_DAEMON_BASE_URL,
+    BASE_URL,
     deps(() => Promise.resolve(new Response("<html>", { status: 200 }))),
     1000,
   );
@@ -74,7 +75,7 @@ test("fetchShow fails soft on a malformed JSON body", async () => {
 });
 
 test("fetchShow aborts a hanging request on timeout", async () => {
-  const result = await fetchShow("m", DEFAULT_DAEMON_BASE_URL, deps(hangingFetch()), 5);
+  const result = await fetchShow("m", BASE_URL, deps(hangingFetch()), 5);
   assert.deepEqual(result, { ok: false });
 });
 

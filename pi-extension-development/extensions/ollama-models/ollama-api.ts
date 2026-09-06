@@ -2,12 +2,10 @@
  * Local daemon API client for the ollama-models extension.
  *
  * POST /api/show needs no auth: the daemon attaches the cloud sign-in when it
- * proxies. Everything here is fail-soft — a failed request resolves to { ok: false } and the caller keeps that model's fallback entry.
+ * proxies. Everything here is fail-soft — a failed request resolves to
+ * { ok: false } and the caller drops that model.
  * Nothing in this module throws.
  */
-
-/** Daemon root; the OpenAI provider endpoint is `${DEFAULT_DAEMON_BASE_URL}/v1`. */
-export const DEFAULT_DAEMON_BASE_URL = "http://127.0.0.1:11434";
 
 /** Per-request timeout; nothing in the extension aborts a fetch batch early. */
 export const FETCH_TIMEOUT_MS = 10000;
@@ -64,7 +62,7 @@ export async function fetchShow(
 
 /**
  * Find `<arch>.context_length` in a /api/show model_info block. Returns
- * undefined when no numeric key matches, so the caller keeps its seed value.
+ * undefined when no numeric key matches, so the caller drops the entry.
  */
 export function getContextLength(modelInfo: Record<string, unknown>): number | undefined {
   for (const [key, value] of Object.entries(modelInfo)) {

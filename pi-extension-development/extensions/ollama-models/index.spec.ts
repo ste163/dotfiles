@@ -6,9 +6,9 @@ import type {
   ProviderConfig,
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import ollamaModelsExtension, { createOllamaModelsExtension, refreshCatalog } from "./index.ts";
+import ollamaModelsExtension, { createOllamaModelsExtension, fetchCatalog } from "./index.ts";
+import { CONFIG } from "./config.ts";
 import type { OllamaModelsDeps, ShowResponse } from "./ollama-api.ts";
-import { SEED_MODEL_IDS, SEED_MODELS } from "./seed.ts";
 
 // --- Minimal fakes for the pi API surface this extension uses ---
 
@@ -28,7 +28,7 @@ const createFakePi = (options?: { failAfter?: number }) => {
   const pi = {
     registerProvider(id: string, config: ProviderConfig): void {
       if (registrations.length >= (options?.failAfter ?? Number.POSITIVE_INFINITY)) {
-        throw new Error("swap rejected");
+        throw new Error("register rejected");
       }
       registrations.push({ id, config });
     },
@@ -88,11 +88,7 @@ const servingDeps = (responses: Record<string, CannedResponse>) => {
 };
 
 const allOk = (contextLength: number): Record<string, CannedResponse> =>
-  Object.fromEntries(SEED_MODEL_IDS.map((id) => [id, okShow(contextLength)]));
-
-// One macrotask flushes every promise continuation from the fire-and-forget
-// handler path, so the wiring tests can await its side effects.
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  Object.fromEntries(CONFIG.models.map((id) => [id, okShow(contextLength)]));
 
 const sessionStartHandler = (handlers: Map<string, SessionStartHandler>): SessionStartHandler => {
   const handler = handlers.get("session_start");
@@ -102,50 +98,68 @@ const sessionStartHandler = (handlers: Map<string, SessionStartHandler>): Sessio
 
 // --- Registration ---
 
-test("createOllamaModelsExtension registers the locked provider config", () => {
+test("a live catalog registers the provider with the config-derived endpoint", async () => {
   const { pi, registrations, handlers } = createFakePi();
-  createOllamaModelsExtension(pi);
+  const { deps } = servingDeps(allOk(4096));
+  await createOllamaModelsExtension(pi, deps);
   assert.equal(registrations.length, 1);
   const registration = registrations[0];
   assert.ok(registration);
   assert.equal(registration.id, "ollama");
   const config = registration.config;
   assert.equal(config.name, "ollama");
-  assert.equal(config.baseUrl, "http://127.0.0.1:11434/v1");
+  assert.equal(config.baseUrl, `${CONFIG.baseUrl}/v1`);
   assert.equal(config.apiKey, "ollama");
   assert.equal(config.api, "openai-completions");
-  assert.equal(config.models, SEED_MODELS);
-  assert.equal(config.refreshModels, undefined); // no refreshModels: the session_start handler owns the refresh
+  // The fetch is owned by the extension at load; pi's refreshModels callback is unused.
+  assert.equal(config.refreshModels, undefined);
+  const models = config.models;
+  assert.ok(models);
+  assert.equal(models.length, CONFIG.models.length);
+  assert.ok(models.every((m) => m.contextWindow === 4096));
   assert.ok(handlers.has("session_start"));
 });
 
-test("the default export registers the same provider", () => {
+test("the default export is the same registerer", async () => {
   const { pi, registrations } = createFakePi();
-  ollamaModelsExtension(pi);
+  const { deps } = servingDeps(allOk(4096));
+  await ollamaModelsExtension(pi, deps);
   assert.equal(registrations.length, 1);
-  const registration = registrations[0];
-  assert.ok(registration);
-  assert.equal(registration.id, "ollama");
 });
 
-// --- session_start wiring ---
+// --- fetchCatalog ---
 
-test("a startup session_start fires the fetch without blocking", async () => {
-  const { pi, registrations, handlers } = createFakePi();
-  const { deps, calls } = servingDeps(allOk(4096));
+test("fetchCatalog fetches every configured id and reports none missing", async () => {
+  const { deps, calls } = servingDeps(allOk(777777));
+  const outcome = await fetchCatalog(deps);
+  assert.deepEqual(calls, [...CONFIG.models]);
+  assert.equal(outcome.models.length, CONFIG.models.length);
+  assert.ok(outcome.models.every((m) => m.contextWindow === 777777));
+  assert.deepEqual(outcome.missing, []);
+});
+
+test("fetchCatalog reports unusable ids by name", async () => {
+  const responses = allOk(888888);
+  const dropped = CONFIG.models[0];
+  assert.ok(dropped); // 404: the serving fetch has no canned response
+  delete responses[dropped];
+  const { deps } = servingDeps(responses);
+  const outcome = await fetchCatalog(deps);
+  assert.equal(outcome.models.length, CONFIG.models.length - 1);
+  assert.deepEqual(outcome.missing, [dropped]);
+});
+
+// --- session_start reporting ---
+
+test("a startup session_start reports the fetched catalog", async () => {
+  const { pi, handlers } = createFakePi();
+  const { deps } = servingDeps(allOk(4096));
   const { ctx, notifications } = createContext(true);
-  createOllamaModelsExtension(pi, deps);
-  const returned = sessionStartHandler(handlers)(
+  await createOllamaModelsExtension(pi, deps);
+  sessionStartHandler(handlers)(
     { type: "session_start", reason: "startup" },
     ctx as unknown as ExtensionContext,
   );
-  assert.equal(returned, undefined); // fire-and-forget: never blocks
-  await settle();
-  assert.deepEqual(calls, [...SEED_MODEL_IDS]);
-  assert.equal(registrations.length, 2); // the swap re-registered
-  const swapped = registrations[1]?.config.models;
-  assert.ok(swapped);
-  assert.ok(swapped.every((m) => m.contextWindow === 4096));
   assert.equal(notifications.length, 1);
   const notification = notifications[0];
   assert.ok(notification);
@@ -153,125 +167,91 @@ test("a startup session_start fires the fetch without blocking", async () => {
   assert.equal(notification.type, "info");
 });
 
-test("a reload session_start also fetches", async () => {
-  const { pi, registrations, handlers } = createFakePi();
+test("a reload session_start reports too", async () => {
+  const { pi, handlers } = createFakePi();
   const { deps } = servingDeps(allOk(4096));
-  const { ctx } = createContext(true);
-  createOllamaModelsExtension(pi, deps);
+  const { ctx, notifications } = createContext(true);
+  await createOllamaModelsExtension(pi, deps);
   sessionStartHandler(handlers)(
     { type: "session_start", reason: "reload" },
     ctx as unknown as ExtensionContext,
   );
-  await settle();
-  assert.equal(registrations.length, 2);
+  assert.equal(notifications.length, 1);
 });
 
-test("in-process session starts (new/resume/fork) fetch nothing", async () => {
-  const { pi, registrations, handlers } = createFakePi();
-  const { deps, calls } = servingDeps(allOk(4096));
+test("in-process session starts (new/resume/fork) stay silent", async () => {
+  const { pi, handlers } = createFakePi();
+  const { deps } = servingDeps(allOk(4096));
   const { ctx, notifications } = createContext(true);
-  createOllamaModelsExtension(pi, deps);
-  sessionStartHandler(handlers)(
-    { type: "session_start", reason: "new" },
-    ctx as unknown as ExtensionContext,
-  );
-  await settle();
-  assert.equal(calls.length, 0);
-  assert.equal(registrations.length, 1);
+  await createOllamaModelsExtension(pi, deps);
+  const handler = sessionStartHandler(handlers);
+  for (const reason of ["new", "resume", "fork"] as const) {
+    handler({ type: "session_start", reason }, ctx as unknown as ExtensionContext);
+  }
   assert.equal(notifications.length, 0);
 });
 
-// --- refreshCatalog behavior ---
-
-test("all four fetches ok: swap in live values, info message", async () => {
-  const { pi, registrations } = createFakePi();
-  const { deps } = servingDeps(allOk(777777));
-  const { ctx, notifications } = createContext(true);
-  createOllamaModelsExtension(pi, deps);
-  await refreshCatalog(pi, ctx, deps);
-  assert.equal(registrations.length, 2);
-  const swapped = registrations[1]?.config.models;
-  assert.ok(swapped);
-  assert.ok(swapped.every((m) => m.contextWindow === 777777));
-  assert.equal(notifications.length, 1);
-  const notification = notifications[0];
-  assert.ok(notification);
-  assert.match(notification.message, /fetched the latest model data/);
-});
-
-test("headless (hasUI false): swap happens, no messages", async () => {
-  const { pi, registrations } = createFakePi();
+test("headless (hasUI false): no messages", async () => {
+  const { pi, handlers } = createFakePi();
   const { deps } = servingDeps(allOk(4096));
   const { ctx, notifications } = createContext(false);
-  createOllamaModelsExtension(pi, deps);
-  await refreshCatalog(pi, ctx, deps);
-  assert.equal(registrations.length, 2);
+  await createOllamaModelsExtension(pi, deps);
+  sessionStartHandler(handlers)(
+    { type: "session_start", reason: "startup" },
+    ctx as unknown as ExtensionContext,
+  );
   assert.equal(notifications.length, 0);
 });
 
-test("one fetch fails: seed fills the gap, warning with the count", async () => {
-  const { pi, registrations } = createFakePi();
+// --- failure modes ---
+
+test("a partial catalog registers the survivors and warns naming the missing id", async () => {
+  const { pi, registrations, handlers } = createFakePi();
   const responses = allOk(888888);
-  delete responses["glm-5.3:cloud"]; // 404: the serving fetch has no canned response
+  const dropped = CONFIG.models[0];
+  assert.ok(dropped);
+  delete responses[dropped];
   const { deps } = servingDeps(responses);
   const { ctx, notifications } = createContext(true);
-  createOllamaModelsExtension(pi, deps);
-  await refreshCatalog(pi, ctx, deps);
-  assert.equal(registrations.length, 2);
-  const swapped = registrations[1]?.config.models;
-  assert.ok(swapped);
-  const byId = new Map(swapped.map((m) => [m.id, m]));
-  const seedGlm = SEED_MODELS.find((m) => m.id === "glm-5.3:cloud");
-  assert.ok(seedGlm);
-  assert.deepEqual(byId.get("glm-5.3:cloud"), seedGlm); // failed fetch -> seed kept
-  assert.equal(byId.get("qwen3.5:cloud")?.contextWindow, 888888); // live value won
+  await createOllamaModelsExtension(pi, deps);
+  assert.equal(registrations.length, 1);
+  const models = registrations[0]?.config.models;
+  assert.ok(models);
+  assert.equal(models.length, CONFIG.models.length - 1);
+  assert.ok(models.every((m) => m.contextWindow === 888888));
+  sessionStartHandler(handlers)(
+    { type: "session_start", reason: "startup" },
+    ctx as unknown as ExtensionContext,
+  );
   assert.equal(notifications.length, 1);
   const notification = notifications[0];
   assert.ok(notification);
-  assert.match(notification.message, /couldn't fetch 1 of 4/);
+  assert.equal(
+    notification.message,
+    `ollama-models: couldn't register 1 of ${CONFIG.models.length} models from the daemon: ${dropped}`,
+  );
   assert.equal(notification.type, "warning");
 });
 
-test("all fetches fail: no swap, warning", async () => {
-  const { pi, registrations } = createFakePi();
+test("a dead daemon fails the load loudly and registers nothing", async () => {
+  const { pi, registrations, handlers } = createFakePi();
   const { deps } = servingDeps({}); // every id answers 404
-  const { ctx, notifications } = createContext(true);
-  createOllamaModelsExtension(pi, deps);
-  await refreshCatalog(pi, ctx, deps);
-  assert.equal(registrations.length, 1); // seed registration stands
-  assert.equal(notifications.length, 1);
-  const notification = notifications[0];
-  assert.ok(notification);
-  assert.match(notification.message, /couldn't fetch 4 of 4/);
-  assert.equal(notification.type, "warning");
+  await assert.rejects(createOllamaModelsExtension(pi, deps), /no usable models/);
+  assert.equal(registrations.length, 0);
+  assert.equal(handlers.size, 0); // no report handler survives a failed load
 });
 
-test("all responses lack tools: no swap, warning", async () => {
+test("tools-less responses fail the load the same way", async () => {
   const { pi, registrations } = createFakePi();
   const responses: Record<string, CannedResponse> = {};
-  for (const id of SEED_MODEL_IDS) responses[id] = okShow(999, ["completion"]);
+  for (const id of CONFIG.models) responses[id] = okShow(999, ["completion"]);
   const { deps } = servingDeps(responses);
-  const { ctx, notifications } = createContext(true);
-  createOllamaModelsExtension(pi, deps);
-  await refreshCatalog(pi, ctx, deps);
-  assert.equal(registrations.length, 1);
-  assert.equal(notifications.length, 1);
-  const notification = notifications[0];
-  assert.ok(notification);
-  assert.match(notification.message, /no usable models/);
-  assert.equal(notification.type, "warning");
+  await assert.rejects(createOllamaModelsExtension(pi, deps), /no usable models/);
+  assert.equal(registrations.length, 0);
 });
 
-test("a swap rejection surfaces the catch-path warning", async () => {
-  const { pi, registrations } = createFakePi({ failAfter: 1 });
+test("a registration rejection propagates as a load failure", async () => {
+  const { pi } = createFakePi({ failAfter: 0 });
   const { deps } = servingDeps(allOk(4096));
-  const { ctx, notifications } = createContext(true);
-  createOllamaModelsExtension(pi, deps);
-  await refreshCatalog(pi, ctx, deps);
-  assert.equal(registrations.length, 1); // the initial registration only
-  assert.equal(notifications.length, 1);
-  const notification = notifications[0];
-  assert.ok(notification);
-  assert.match(notification.message, /catalog refresh failed/);
-  assert.equal(notification.type, "warning");
+  await assert.rejects(createOllamaModelsExtension(pi, deps), /register rejected/);
 });

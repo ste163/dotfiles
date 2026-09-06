@@ -1,29 +1,40 @@
 # ollama-models
 
-A pi extension that owns the `ollama` provider. The model catalog lives here
-as tracked code instead of hand-maintained, machine-local models.json state.
-pi registers the built-in catalog at load, then fetches live metadata (context window,
-capabilities) from the local Ollama daemon once per pi process start and
-swaps it in. A failed fetch keeps the built-in values; the session shows a
-message on success and a warning when the daemon could not be reached.
+A pi extension that owns the `ollama` provider: the cloud-routed models
+served by the local Ollama daemon. No ollama.com account, no API key — the
+daemon attaches its own cloud sign-in when it proxies.
 
-No ollama.com, no API keys, no new credentials — the daemon attaches the
-cloud sign-in itself when it proxies.
+## How it works
 
-## Adding a model
+1. `config.json` (this directory) names the models you want — ids only.
+2. At every pi start, the extension asks the daemon for each id's live data
+   (POST /api/show) and registers the provider in memory from that data
+   alone: context window, vision, thinking.
+3. The daemon is the only data source. Nothing is cached, nothing is written
+   to disk, and pi's own model files are never touched.
 
-The daemon cannot list its models (its enumeration endpoints return
-nothing), so the built-in catalog is the source of truth:
+If the daemon yields no usable model, the extension fails to load loudly:
+pi reports the failure, the ollama provider is absent for that session, and
+a fresh pi start is the retry.
 
-1. Probe the daemon for the model's metadata:
-   `curl http://127.0.0.1:11434/api/show -d '{"model":"<id>"}'`
-   Note the `*.context_length` value under `model_info` and the
-   `capabilities` array.
-2. Add the id to `SEED_MODEL_IDS` and a matching `buildSeed(...)` entry in
-   `seed.ts`. Use the probed context window, and set vision true only when
-   the daemon reports the vision capability.
-3. Update `seed.spec.ts` to match, then run the checklist from
-   `pi-extension-development/` (typecheck, lint, format, test — see AGENTS.md
-   there). Every file stays at 100% coverage.
+## config.json
 
-Removing a model is the same in reverse.
+| Field     | Meaning                                                                                               |
+| --------- | ----------------------------------------------------------------------------------------------------- |
+| `baseUrl` | Daemon root, e.g. `http://127.0.0.1:11434`. No path — the code derives `/v1` and `/api/show` from it. |
+| `models`  | The model ids you want. Non-empty, unique.                                                            |
+
+Validation is strict and throws at load: unknown fields, a bad URL, or
+duplicate/empty ids stop the extension with a message naming the problem.
+
+## Adding or removing a model
+
+Edit the `models` array. That is the whole change: the next pi start
+fetches the new list's data from the daemon. An id the daemon cannot
+describe simply comes back missing — you get a warning naming them.
+
+## Development
+
+Same workflow as the rest of `pi-extension-development/` (typecheck, lint,
+format, test). This directory is symlinked into `.pi/extensions/`, so edits
+are live on the next pi start.

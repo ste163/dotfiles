@@ -4,19 +4,23 @@ import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { assembleModel, assembleModels } from "./assemble.ts";
 import type { ShowResponse } from "./ollama-api.ts";
 
-const SEED_COMPAT = { supportsStore: false };
-
-const seed = (id: string): ProviderModelConfig => ({
-  id,
-  name: id,
-  reasoning: true,
-  thinkingLevelMap: { off: null, max: "max" },
-  input: ["text"],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 128000,
-  maxTokens: 32768,
-  compat: SEED_COMPAT,
-});
+/** The explicit compat block every assembled entry carries. */
+const COMPAT: NonNullable<ProviderModelConfig["compat"]> = {
+  supportsDeveloperRole: false,
+  supportsReasoningEffort: true,
+  supportsStore: false,
+  maxTokensField: "max_tokens",
+  supportsUsageInStreaming: true,
+  requiresToolResultName: false,
+  requiresAssistantAfterToolResult: false,
+  requiresThinkingAsText: false,
+  requiresReasoningContentOnAssistantMessages: false,
+  thinkingFormat: "openai",
+  supportsStrictMode: false,
+  sendSessionAffinityHeaders: false,
+  supportsLongCacheRetention: false,
+  zaiToolStream: false,
+};
 
 const show = (
   contextLength: number | undefined,
@@ -26,54 +30,55 @@ const show = (
   ...(capabilities !== undefined ? { capabilities } : {}),
 });
 
-test("assembleModel maps thinking to reasoning and vision to image input", () => {
-  const result = assembleModel(
-    seed("m"),
+test("assembleModel builds a full entry from live data", () => {
+  const entry = assembleModel(
+    "m:cloud",
     show(262144, ["completion", "thinking", "tools", "vision"]),
   );
-  assert.ok(result);
-  assert.equal(result.reasoning, true);
-  assert.deepEqual(result.input, ["text", "image"]);
-  assert.equal(result.contextWindow, 262144);
-  // Static seed fields pass through untouched.
-  assert.equal(result.maxTokens, 32768);
-  assert.deepEqual(result.thinkingLevelMap, { off: null, max: "max" });
-  assert.deepEqual(result.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-  assert.equal(result.compat, SEED_COMPAT);
+  assert.ok(entry);
+  assert.equal(entry.id, "m:cloud");
+  assert.equal(entry.name, "m:cloud");
+  assert.equal(entry.reasoning, true);
+  assert.deepEqual(entry.thinkingLevelMap, { off: null, max: "max" });
+  assert.deepEqual(entry.input, ["text", "image"]);
+  assert.equal(entry.contextWindow, 262144);
+  assert.deepEqual(entry.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  assert.equal(entry.maxTokens, 32768);
+  assert.deepEqual(entry.compat, COMPAT);
 });
 
-test("assembleModel maps a no-thinking, no-vision model and keeps the seed context window", () => {
-  const result = assembleModel(seed("m"), show(undefined, ["completion", "tools"]));
-  assert.ok(result);
-  assert.equal(result.reasoning, false);
-  assert.deepEqual(result.input, ["text"]);
-  assert.equal(result.contextWindow, 128000);
+test("assembleModel omits the thinking map for a no-thinking, no-vision model", () => {
+  const entry = assembleModel("m", show(8192, ["completion", "tools"]));
+  assert.ok(entry);
+  assert.equal(entry.reasoning, false);
+  assert.deepEqual(entry.input, ["text"]);
+  assert.ok(!("thinkingLevelMap" in entry));
 });
 
-test("assembleModel drops models without the tools capability", () => {
-  assert.equal(assembleModel(seed("m"), show(1, ["completion", "thinking"])), undefined);
-  assert.equal(assembleModel(seed("m"), show(1, undefined)), undefined);
+test("assembleModel drops models the daemon cannot serve pi with", () => {
+  // No tools capability — twice, including no capabilities at all.
+  assert.equal(assembleModel("m", show(1024, ["completion", "thinking"])), undefined);
+  assert.equal(assembleModel("m", show(1024, undefined)), undefined);
+  // No usable context length.
+  assert.equal(assembleModel("m", show(undefined, ["completion", "tools"])), undefined);
+  assert.equal(assembleModel("m", show(0, ["completion", "tools"])), undefined);
+  assert.equal(assembleModel("m", show(-1, ["completion", "tools"])), undefined);
 });
 
-test("assembleModels keeps fallback entries, replaces live ones, drops tools-less ones", () => {
-  const a = seed("a");
-  const b = seed("b");
-  const c = seed("c");
+test("assembleModels keeps only usable ids", () => {
   const shows = new Map<string, ShowResponse>([
-    ["b", show(999, ["completion", "thinking", "tools"])],
-    ["c", show(999, ["completion"])],
+    ["a", show(999, ["completion", "thinking", "tools"])],
+    ["c", show(999, ["completion"])], // tools-less: dropped
   ]);
-  const merged = assembleModels([a, b, c], shows);
-  assert.equal(merged.length, 2);
-  assert.equal(merged[0], a); // no show data -> the same fallback entry kept
-  const assembled = merged[1];
-  assert.ok(assembled);
-  assert.equal(assembled.id, "b");
-  assert.equal(assembled.contextWindow, 999);
+  const assembled = assembleModels(["a", "b", "c"], shows); // b never fetched: dropped
+  assert.equal(assembled.length, 1);
+  const entry = assembled[0];
+  assert.ok(entry);
+  assert.equal(entry.id, "a");
+  assert.equal(entry.contextWindow, 999);
 });
 
-test("assembleModels returns [] when every fetched model lacks tools", () => {
-  const a = seed("a");
+test("assembleModels returns [] when nothing is usable", () => {
   const shows = new Map([["a", show(999, ["completion"])]]);
-  assert.deepEqual(assembleModels([a], shows), []);
+  assert.deepEqual(assembleModels(["a"], shows), []);
 });
