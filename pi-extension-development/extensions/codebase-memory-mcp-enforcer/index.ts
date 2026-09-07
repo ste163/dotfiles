@@ -48,7 +48,10 @@ export const createCodebaseMemoryMcpEnforcerExtension = (
     const gitRoot = findGitRoot(deps.cwd(), deps);
     if (!gitRoot) return; // not in a git repo, allow
 
-    return { block: true, reason: blockMessage(gitRoot, violations, mcpState(gitRoot, deps)) };
+    return {
+      block: true,
+      reason: blockMessage(gitRoot, violations, mcpState(gitRoot, deps), deps.homeDir()),
+    };
   });
 
   // Pre-turn reminder (fights context decay)
