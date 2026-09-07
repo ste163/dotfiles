@@ -1,0 +1,60 @@
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+import { loadConfig } from "./config.ts";
+import type { HooksDeps } from "./deps.ts";
+
+const depsWith = (raw: string | null): Pick<HooksDeps, "readFile" | "cwd"> => ({
+  readFile: () => raw,
+  cwd: () => "/virtual/repo",
+});
+
+test("loadConfig returns a null config when the file is missing", () => {
+  assert.deepEqual(loadConfig(depsWith(null)), { config: null, error: null });
+});
+
+test("loadConfig parses a valid config", () => {
+  const { config, error } = loadConfig(depsWith('{"tool_call":{"command":"sh x.sh"}}'));
+  assert.equal(error, null);
+  assert.deepEqual(config, { tool_call: { command: "sh x.sh" } });
+});
+
+test("loadConfig reports invalid JSON with the config path", () => {
+  const { config, error } = loadConfig(depsWith("not json"));
+  assert.equal(config, null);
+  assert.ok(error?.includes("Invalid JSON"));
+  assert.ok(error?.includes("/virtual/repo/.pi/hooks.json"));
+});
+
+test("loadConfig rejects an unsupported when value", () => {
+  const { config, error } = loadConfig(
+    depsWith('{"agent_settled":{"command":"sh v.sh","when":"always"}}'),
+  );
+  assert.equal(config, null);
+  assert.ok(error?.includes('Unsupported "when" value'));
+});
+
+test("loadConfig rejects when dirty without paths", () => {
+  const { config, error } = loadConfig(
+    depsWith('{"agent_settled":{"command":"sh v.sh","when":"dirty"}}'),
+  );
+  assert.equal(config, null);
+  assert.ok(error?.includes('requires a non-empty "paths"'));
+});
+
+test("loadConfig rejects when dirty with empty paths", () => {
+  const { config, error } = loadConfig(
+    depsWith('{"agent_settled":{"command":"sh v.sh","when":"dirty","paths":[]}}'),
+  );
+  assert.equal(config, null);
+  assert.ok(error?.includes('requires a non-empty "paths"'));
+});
+
+test("loadConfig accepts when dirty with paths", () => {
+  const { config, error } = loadConfig(
+    depsWith('{"agent_settled":{"command":"sh v.sh","when":"dirty","paths":["src/**"]}}'),
+  );
+  assert.equal(error, null);
+  assert.deepEqual(config, {
+    agent_settled: { command: "sh v.sh", when: "dirty", paths: ["src/**"] },
+  });
+});
