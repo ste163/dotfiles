@@ -18,7 +18,7 @@ import { projectNameFor, type McpState } from "./mcp-state.ts";
 const quotable = (token: string): string => {
   const opener = token[0];
   if (opener !== "'" && opener !== '"') return token;
-  return token.length > 1 && token[token.length - 1] === opener ? token.slice(1, -1) : "...";
+  return token.length > 1 && token.at(-1) === opener ? token.slice(1, -1) : "...";
 };
 
 /** The best-effort search pattern from a blocked segment, for the rewrite line. */
@@ -55,6 +55,46 @@ const EXEMPTIONS =
 
 const UNREACHABLE = "Inform the user and stop this line of work.";
 
+const blockBody = (
+  gitRoot: string,
+  violations: readonly string[],
+  state: McpState,
+  project: string,
+): string => {
+  const rewrites = violations.map((segment) => searchCallLine(project, searchPattern(segment)));
+  if (state.registered && state.indexed) {
+    return (
+      "Try instead:\n" +
+      rewrites.join("\n") +
+      "\n\nIf those fail, the server is unreachable. " +
+      UNREACHABLE
+    );
+  }
+  if (state.registered) {
+    return (
+      "Index the repo, then search:\n" +
+      indexCallLine(gitRoot) +
+      "\n" +
+      rewrites.join("\n") +
+      "\n\nIf those fail, the server is unreachable. " +
+      UNREACHABLE
+    );
+  }
+  const first = violations[0] as string;
+  return (
+    '1. Not connected?    mcp({ connect: "codebase-memory-mcp" })\n' +
+    '2. First time here?  mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "' +
+    gitRoot +
+    '", mode: "fast" } })\n' +
+    '3. Project name?     mcp({ tool: "codebase-memory-mcp_list_projects" })\n' +
+    "4. Search:           " +
+    searchCallLine("<name>", searchPattern(first)) +
+    "\n" +
+    "5. Still failing?    The server is unreachable. " +
+    UNREACHABLE
+  );
+};
+
 /** The block message: a ready-made rewrite when the state is readable, the ladder when it is not. */
 export const blockMessage = (
   gitRoot: string,
@@ -72,38 +112,14 @@ export const blockMessage = (
         outside.map((target) => "`" + target + "`").join(", ") +
         "). codebase-memory-mcp only indexes this repo, so MCP cannot search there. " +
         "Use `read` for known paths, or run the search in a shell outside pi.";
-  let body: string;
-  if (state.registered && state.indexed) {
-    const rewrites = violations.map((segment) => searchCallLine(project, searchPattern(segment)));
-    body =
-      "Try instead:\n" +
-      rewrites.join("\n") +
-      "\n\nIf those fail, the server is unreachable. " +
-      UNREACHABLE;
-  } else if (state.registered) {
-    const rewrites = violations.map((segment) => searchCallLine(project, searchPattern(segment)));
-    body =
-      "Index the repo, then search:\n" +
-      indexCallLine(gitRoot) +
-      "\n" +
-      rewrites.join("\n") +
-      "\n\nIf those fail, the server is unreachable. " +
-      UNREACHABLE;
-  } else {
-    const first = violations[0] as string;
-    body =
-      '1. Not connected?    mcp({ connect: "codebase-memory-mcp" })\n' +
-      '2. First time here?  mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "' +
-      gitRoot +
-      '", mode: "fast" } })\n' +
-      '3. Project name?     mcp({ tool: "codebase-memory-mcp_list_projects" })\n' +
-      "4. Search:           " +
-      searchCallLine("<name>", searchPattern(first)) +
-      "\n" +
-      "5. Still failing?    The server is unreachable. " +
-      UNREACHABLE;
-  }
-  return header + "\n\n" + body + outsideNote + "\n\n" + EXEMPTIONS;
+  return (
+    header +
+    "\n\n" +
+    blockBody(gitRoot, violations, state, project) +
+    outsideNote +
+    "\n\n" +
+    EXEMPTIONS
+  );
 };
 
 /** The pre-turn reminder: report the state, then the decision rule. */

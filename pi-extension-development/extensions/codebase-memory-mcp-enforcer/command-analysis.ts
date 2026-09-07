@@ -12,8 +12,9 @@
  * - A grep-family segment over named docs/config files passes, including
  *   `git grep -- <docs paths>`. Redirection tokens (`2>/dev/null`, `>out.txt`)
  *   are stripped before this check, so they never break the exemption.
- *   Flags that take a separate value (`-A 8`, `--max-count 5`) are skipped
- *   with their values, so they never masquerade as patterns or targets.
+ *   A bare number directly after a flag is that flag's value (`-A 8`,
+ *   `--max-count 5`) and is skipped, so it never masquerades as the
+ *   pattern or a target.
  * - `cat` with a glob passes when the glob is over a dotfile dir (`.husky`,
  *   `.github`, `.pi`, ...) or ends in a docs extension.
  * - Quoted text and `--grep`-style flags are masked before the patterns
@@ -26,8 +27,10 @@
  * message can say MCP cannot search there. It does not change the verdict.
  *
  * Accepted leaks: `node -e`, `sh -c`, `awk`, `sed`, and command
- * substitution inside double quotes can hide file reads. This extension is
- * a speed bump against reflexive grep/rg/find, not a sandbox.
+ * substitution inside double quotes can hide file reads, and a numeric
+ * pattern after a boolean flag (`grep -n 42 src/`) is mistaken for a flag
+ * value. This extension is a speed bump against reflexive grep/rg/find,
+ * not a sandbox.
  */
 
 const fileExtension = (token: string): string => {
@@ -53,75 +56,37 @@ const collapseQuoted = (segment: string): string =>
 const REDIRECT_TOKEN = /^(&|\d*)[<>]{1,2}\S*$/;
 const BARE_REDIRECT_OP = /^(&|\d*)[<>]{1,2}$/;
 
-/** Drop redirection operators and their file targets from a token list. */
 const stripRedirections = (tokens: readonly string[]): readonly string[] => {
-  const kept: string[] = [];
-  let skipNext = false;
-  for (const token of tokens) {
-    if (skipNext) {
-      skipNext = false;
-      continue;
-    }
-    if (REDIRECT_TOKEN.test(token)) {
-      skipNext = BARE_REDIRECT_OP.test(token);
-      continue;
-    }
-    kept.push(token);
-  }
-  return kept;
+  const walk = (rest: readonly string[], skipNext: boolean): readonly string[] => {
+    const token = rest[0];
+    if (token === undefined) return [];
+    if (skipNext) return walk(rest.slice(1), false);
+    if (REDIRECT_TOKEN.test(token)) return walk(rest.slice(1), BARE_REDIRECT_OP.test(token));
+    return [token, ...walk(rest.slice(1), false)];
+  };
+  return walk(tokens, false);
 };
 
-/** Collapsed tokens with redirection operators and their targets removed. */
 const collapsedTokens = (segment: string): readonly string[] =>
   stripRedirections(collapseQuoted(segment).trim().split(/\s+/));
 
-// Grep-family flags that take their value as a separate token. Boolean
-// flags (`-i`, `-n`, `-r`) are not listed. Combined short flags put the
-// value-taking flag last (`-iA 8`).
-const VALUE_SHORT_FLAGS: readonly string[] = ["A", "B", "C", "m", "e", "f", "d", "D"];
-const VALUE_LONG_FLAGS: readonly string[] = [
-  "--after-context",
-  "--before-context",
-  "--context",
-  "--max-count",
-  "--regexp",
-  "--file",
-  "--include",
-  "--exclude",
-  "--exclude-dir",
-  "--include-dir",
-  "--label",
-  "--group-separator",
-  "--binary-files",
-  "--directories",
-  "--devices",
-];
+const isBareNumber = (token: string): boolean => /^\d+$/.test(token);
 
-const takesValue = (token: string): boolean => {
-  if (token.startsWith("--")) return VALUE_LONG_FLAGS.includes(token);
-  if (/^-[A-Za-z]+$/.test(token)) {
-    const letters = token.slice(1);
-    return VALUE_SHORT_FLAGS.includes(letters[letters.length - 1] as string);
-  }
-  return false;
-};
-
-/** Positional args with flags and their value tokens removed; `--` ends flag parsing. */
+/**
+ * Positional args with flags removed. A bare number directly after a flag
+ * is that flag's value (`-A 8`, `--max-count 5`), so it is removed too and
+ * never masquerades as the pattern or a target.
+ */
 export const positionalArgs = (tokens: readonly string[]): readonly string[] => {
-  const args: string[] = [];
-  let skipNext = false;
-  for (const token of tokens) {
-    if (skipNext) {
-      skipNext = false;
-      continue;
-    }
-    if (token.startsWith("-")) {
-      skipNext = takesValue(token);
-      continue;
-    }
-    args.push(token);
-  }
-  return args;
+  const walk = (rest: readonly string[], previousWasFlag: boolean): readonly string[] => {
+    const token = rest[0];
+    if (token === undefined) return [];
+    const isFlag = token.startsWith("-");
+    const isFlagValue = previousWasFlag && isBareNumber(token);
+    const tail = walk(rest.slice(1), isFlag);
+    return isFlag || isFlagValue ? tail : [token, ...tail];
+  };
+  return walk(tokens, false);
 };
 
 const leadingWord = (text: string): string => text.trim().split(/\s+/)[0] as string;

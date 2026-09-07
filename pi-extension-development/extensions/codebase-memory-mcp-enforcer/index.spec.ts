@@ -221,6 +221,14 @@ test("blocks searches with code or directory targets", async () => {
   await blocked("git grep foo", deps);
 });
 
+test("blocks -e and -f searches whose value is the pattern", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git"]);
+  await blocked("grep -e pattern src/", deps);
+  await blocked("grep -f patterns.txt src/", deps);
+  await blocked("grep --regexp pattern src/", deps);
+  await blocked("grep --file patterns.txt src/", deps);
+});
+
 test("blocks find by name or type", async () => {
   const deps = createFakeDeps(["/virtual/repo/.git"]);
   await blocked('find . -name "*permission*"', deps);
@@ -282,6 +290,14 @@ test("expands ~ against the home dir when judging outside targets", async () => 
   assert.ok(!insideReason.includes("outside the project"));
 });
 
+test("names outside targets after -e patterns", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
+    [CONFIG_PATH]: REGISTERED_MCP,
+  });
+  const reason = await blocked("grep -e foo /outside", deps);
+  assert.ok(reason.includes("`/outside`"));
+});
+
 // --- Allows ---
 
 test("allows pipe filters over command output", async () => {
@@ -322,6 +338,12 @@ test("allows grep-family over named docs or config files", async () => {
   await allowed("git grep pattern README.md docs/notes.txt", deps);
 });
 
+test("allows -e and -f over named docs files", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git"]);
+  await allowed("grep -e pattern file.md", deps);
+  await allowed("grep -f patterns.txt file.md", deps);
+});
+
 test("allows grep-family over named docs or config files with redirections", async () => {
   const deps = createFakeDeps(["/virtual/repo/.git"]);
   await allowed("grep -n 'mcp' a.md b.md 2>/dev/null", deps);
@@ -332,7 +354,7 @@ test("allows grep-family over named docs or config files with redirections", asy
   await allowed("rg -i pattern README.md 2>&1", deps);
 });
 
-test("skips flags that take a separate value when judging targets", async () => {
+test("handles value-taking flags when judging targets", async () => {
   const deps = createFakeDeps(["/virtual/repo/.git"]);
   await allowed("grep -A 8 pattern file.md", deps);
   await allowed("grep -e pattern file.md", deps);
@@ -350,6 +372,15 @@ test("extracts the pattern, not a flag value, in the rewrite", async () => {
   const reason = await blocked("grep -A 8 pattern src/", deps);
   assert.ok(reason.includes('pattern: "pattern"'));
   assert.ok(!reason.includes('pattern: "8"'));
+});
+
+test("extracts the pattern from -e searches in the rewrite", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
+    [CONFIG_PATH]: REGISTERED_MCP,
+  });
+  const reason = await blocked("grep -e pattern src/", deps);
+  assert.ok(reason.includes('pattern: "pattern"'));
+  assert.ok(!reason.includes('pattern: "src/"'));
 });
 
 test("allows cat with a glob over dotfile dirs or docs extensions", async () => {
