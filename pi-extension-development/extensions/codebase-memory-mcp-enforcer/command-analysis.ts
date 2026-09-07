@@ -10,11 +10,20 @@
  *   reading stdin — a pipe filter over command output, not code search —
  *   and passes. rg never gets this pass: with no targets it recurses.
  * - A grep-family segment over named docs/config files passes, including
- *   `git grep -- <docs paths>`.
+ *   `git grep -- <docs paths>`. Redirection tokens (`2>/dev/null`, `>out.txt`)
+ *   are stripped before this check, so they never break the exemption.
+ *   Flags that take a separate value (`-A 8`, `--max-count 5`) are skipped
+ *   with their values, so they never masquerade as patterns or targets.
+ * - `cat` with a glob passes when the glob is over a dotfile dir (`.husky`,
+ *   `.github`, `.pi`, ...) or ends in a docs extension.
  * - Quoted text and `--grep`-style flags are masked before the patterns
  *   run, so `git commit -m "fix the grep hack"` and `git log --grep` never
  *   trip.
  * - Anything else matching a code-search pattern blocks.
+ *
+ * `outsideProjectTargets` is a separate, best-effort helper for the block
+ * message: it names absolute-path targets outside the git root so the
+ * message can say MCP cannot search there. It does not change the verdict.
  *
  * Accepted leaks: `node -e`, `sh -c`, `awk`, `sed`, and command
  * substitution inside double quotes can hide file reads. This extension is
@@ -37,6 +46,83 @@ const maskForMatching = (segment: string): string =>
 /** Collapse each quoted span into one token that keeps the target's file extension. */
 const collapseQuoted = (segment: string): string =>
   segment.replace(/'[^']*'|"[^"]*"/g, (quoted) => "QUOTED" + fileExtension(quoted.slice(1, -1)));
+
+// Redirection tokens: `2>/dev/null` (inline file), `2>&1` (fd), `> out.txt`
+// (bare operator with a separate target). Inline forms are self-contained;
+// bare operators consume the next token as their target.
+const REDIRECT_TOKEN = /^(&|\d*)[<>]{1,2}\S*$/;
+const BARE_REDIRECT_OP = /^(&|\d*)[<>]{1,2}$/;
+
+/** Drop redirection operators and their file targets from a token list. */
+const stripRedirections = (tokens: readonly string[]): readonly string[] => {
+  const kept: string[] = [];
+  let skipNext = false;
+  for (const token of tokens) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (REDIRECT_TOKEN.test(token)) {
+      skipNext = BARE_REDIRECT_OP.test(token);
+      continue;
+    }
+    kept.push(token);
+  }
+  return kept;
+};
+
+/** Collapsed tokens with redirection operators and their targets removed. */
+const collapsedTokens = (segment: string): readonly string[] =>
+  stripRedirections(collapseQuoted(segment).trim().split(/\s+/));
+
+// Grep-family flags that take their value as a separate token. Boolean
+// flags (`-i`, `-n`, `-r`) are not listed. Combined short flags put the
+// value-taking flag last (`-iA 8`).
+const VALUE_SHORT_FLAGS: readonly string[] = ["A", "B", "C", "m", "e", "f", "d", "D"];
+const VALUE_LONG_FLAGS: readonly string[] = [
+  "--after-context",
+  "--before-context",
+  "--context",
+  "--max-count",
+  "--regexp",
+  "--file",
+  "--include",
+  "--exclude",
+  "--exclude-dir",
+  "--include-dir",
+  "--label",
+  "--group-separator",
+  "--binary-files",
+  "--directories",
+  "--devices",
+];
+
+const takesValue = (token: string): boolean => {
+  if (token.startsWith("--")) return VALUE_LONG_FLAGS.includes(token);
+  if (/^-[A-Za-z]+$/.test(token)) {
+    const letters = token.slice(1);
+    return VALUE_SHORT_FLAGS.includes(letters[letters.length - 1] as string);
+  }
+  return false;
+};
+
+/** Positional args with flags and their value tokens removed; `--` ends flag parsing. */
+export const positionalArgs = (tokens: readonly string[]): readonly string[] => {
+  const args: string[] = [];
+  let skipNext = false;
+  for (const token of tokens) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (token.startsWith("-")) {
+      skipNext = takesValue(token);
+      continue;
+    }
+    args.push(token);
+  }
+  return args;
+};
 
 const leadingWord = (text: string): string => text.trim().split(/\s+/)[0] as string;
 
@@ -125,12 +211,11 @@ export const searchFamilyTail = (tokens: readonly string[]): readonly string[] |
   );
 
 const isDocsOnlySearch = (segment: string): boolean => {
-  const collapsed = collapseQuoted(segment);
-  if (DISQUALIFIERS.some((disqualifier) => collapsed.includes(disqualifier))) return false;
-  const tokens = collapsed.trim().split(/\s+/);
+  const tokens = collapsedTokens(segment);
+  if (DISQUALIFIERS.some((disqualifier) => tokens.join(" ").includes(disqualifier))) return false;
   const tail = searchFamilyTail(tokens);
   if (!tail) return false;
-  const args = tail.filter((token) => !token.startsWith("-"));
+  const args = positionalArgs(tail);
   if (args.length < 2) return false; // a pattern alone, or no named targets
   return args.slice(1).every((target) => DOCS_EXTENSIONS.includes(fileExtension(target)));
 };
@@ -143,11 +228,10 @@ const isRecursiveFlag = (token: string): boolean =>
   token === "--recursive" || (/^-[a-zA-Z]/.test(token) && /[rR]/.test(token.slice(1)));
 
 const isStdinFilter = (segment: string): boolean => {
-  const collapsed = collapseQuoted(segment);
-  if (DISQUALIFIERS.some((disqualifier) => collapsed.includes(disqualifier))) return false;
-  const tokens = collapsed.trim().split(/\s+/);
+  const tokens = collapsedTokens(segment);
+  if (DISQUALIFIERS.some((disqualifier) => tokens.join(" ").includes(disqualifier))) return false;
   if (!STDIN_FILTER_FAMILY.includes(leadingWord(segment))) return false;
-  const args = tokens.slice(1).filter((token) => !token.startsWith("-"));
+  const args = positionalArgs(tokens.slice(1));
   const targets = args.slice(1);
   return targets.length === 0 && !tokens.some(isRecursiveFlag);
 };
@@ -156,11 +240,66 @@ const isAllowlistedSegment = (segment: string): boolean =>
   !DISQUALIFIERS.some((disqualifier) => maskQuoted(segment).includes(disqualifier)) &&
   ALLOWED_COMMANDS.includes(leadingWord(segment));
 
+/** True when any path segment is a dotfile dir (`.husky`, `.github`, `.pi`, ...), not `..`. */
+const isDotDirPath = (dirPart: string): boolean => {
+  const normalized = dirPart.replace(/^\.\//, "");
+  return normalized
+    .split("/")
+    .filter(Boolean)
+    .some((segment) => segment.startsWith(".") && !segment.startsWith(".."));
+};
+
+/** True when a cat segment's globs all point at dotfile dirs or docs-extension files. */
+const isCatDotfileGlob = (segment: string): boolean => {
+  const tokens = collapsedTokens(segment);
+  if (DISQUALIFIERS.some((disqualifier) => tokens.join(" ").includes(disqualifier))) return false;
+  if (tokens[0] !== "cat") return false;
+  const globs = tokens.slice(1).filter((token) => !token.startsWith("-") && /[*?[]/.test(token));
+  if (globs.length === 0) return false;
+  return globs.every((glob) => {
+    const slash = glob.lastIndexOf("/");
+    const dirPart = slash === -1 ? "" : glob.slice(0, slash + 1);
+    const base = slash === -1 ? glob : glob.slice(slash + 1);
+    return isDotDirPath(dirPart) || DOCS_EXTENSIONS.includes(fileExtension(base));
+  });
+};
+
 /** True when the segment is code search and should be blocked. */
 export const isCodeSearchSegment = (segment: string): boolean => {
   if (isAllowlistedSegment(segment)) return false;
+  if (isCatDotfileGlob(segment)) return false;
   if (!CODE_SEARCH_PATTERNS.some((pattern) => pattern.test(maskForMatching(segment)))) return false;
   if (isDocsOnlySearch(segment)) return false;
   if (isStdinFilter(segment)) return false;
   return true;
+};
+
+/**
+ * Absolute-path targets in the segment that sit outside the git root.
+ * Best-effort guidance for the block message, not a verdict: quoted paths
+ * with spaces and substitution-hidden paths are missed. `~` expands via
+ * homeDir. For grep-family segments the first non-flag arg is the pattern
+ * and is skipped.
+ */
+export const outsideProjectTargets = (
+  segment: string,
+  gitRoot: string,
+  homeDir: string,
+): readonly string[] => {
+  if (
+    DISQUALIFIERS.some((disqualifier) => collapsedTokens(segment).join(" ").includes(disqualifier))
+  ) {
+    return [];
+  }
+  const tokens = stripRedirections(
+    segment
+      .trim()
+      .split(/\s+/)
+      .map((token) => (token.startsWith("~/") ? homeDir + token.slice(1) : token)),
+  );
+  const tail = searchFamilyTail(positionalArgs(tokens));
+  const targets = tail ? tail.slice(1) : positionalArgs(tokens);
+  return targets.filter(
+    (token) => token.startsWith("/") && token !== gitRoot && !token.startsWith(gitRoot + "/"),
+  );
 };
