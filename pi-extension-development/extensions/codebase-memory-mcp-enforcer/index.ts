@@ -15,8 +15,8 @@
 
 import { join } from "node:path";
 import { isToolCallEventType, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isCodeSearchSegment, splitSegments } from "./command-analysis.ts";
-import { mcpState } from "./mcp-state.ts";
+import { fileTargets, isCodeSearchSegment, splitSegments } from "./command-analysis.ts";
+import { indexDbMtimeMs, mcpState } from "./mcp-state.ts";
 import { blockMessage, reminderMessage } from "./messages.ts";
 import { defaultDeps, type CodebaseMemoryMcpEnforcerDeps } from "./deps.ts";
 
@@ -34,6 +34,17 @@ const findGitRoot = (dir: string, deps: CodebaseMemoryMcpEnforcerDeps): string |
   return walk(dir, 16);
 };
 
+/** True when the path is a file whose mtime is newer than the index db's. */
+const isStaleFile = (
+  path: string,
+  dbMtime: number,
+  deps: CodebaseMemoryMcpEnforcerDeps,
+): boolean => {
+  if (!deps.existsSync(path)) return false;
+  const stats = deps.statSync(path);
+  return stats.isFile && stats.mtimeMs > dbMtime;
+};
+
 export const createCodebaseMemoryMcpEnforcerExtension = (
   pi: ExtensionAPI,
   deps: CodebaseMemoryMcpEnforcerDeps = defaultDeps,
@@ -48,9 +59,17 @@ export const createCodebaseMemoryMcpEnforcerExtension = (
     const gitRoot = findGitRoot(deps.cwd(), deps);
     if (!gitRoot) return; // not in a git repo, allow
 
+    const dbMtime = indexDbMtimeMs(gitRoot, deps);
+    const stale =
+      dbMtime === null
+        ? []
+        : violations
+            .flatMap((segment) => fileTargets(segment, deps.cwd(), deps.homeDir()))
+            .filter((path) => path.startsWith(gitRoot + "/") && isStaleFile(path, dbMtime, deps));
+
     return {
       block: true,
-      reason: blockMessage(gitRoot, violations, mcpState(gitRoot, deps), deps.homeDir()),
+      reason: blockMessage(gitRoot, violations, mcpState(gitRoot, deps), deps.homeDir(), stale),
     };
   });
 

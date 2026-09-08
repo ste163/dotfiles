@@ -53,6 +53,10 @@ the rule when creating new extensions.
 
 ## Mandatory checklist — run before any extension work is considered done
 
+The `hooks` extension runs this checklist automatically after edits (config:
+`.pi/hooks.json`, script: `scripts/hooks/verify.sh`). The manual run below
+remains the final gate.
+
 All of the following must pass, every time, with no exceptions:
 
 ```sh

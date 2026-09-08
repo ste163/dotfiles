@@ -1,17 +1,19 @@
 /**
  * hooks — config-driven shell hooks for pi.
  *
- * Reads `.pi/hooks.json` from the project root and runs the configured
+ * Reads `.pi/hooks.json` from the session cwd and runs the configured
  * shell commands on pi events (the Copilot CLI / Claude Code hooks model):
  *
  * - `tool_call`: the tool input JSON is passed as the last argument. A
- *   non-zero exit blocks the tool call with stdout as the reason.
+ *   non-zero exit blocks the tool call with the hook's stdout/stderr as
+ *   the reason.
  * - `agent_settled`: the command runs when the agent settles. With
  *   `"when": "dirty"`, it only runs after the session edited or wrote a
  *   file matching one of the configured `paths` patterns.
  *
- * The policy lives in the scripts, not here — this extension only wires
- * events to commands.
+ * The config loads lazily on the first event, resolved against the session
+ * cwd — never `process.cwd()`, which can diverge from it. The policy lives
+ * in the scripts, not here — this extension only wires events to commands.
  */
 
 import {
@@ -23,7 +25,7 @@ import {
   type ToolCallEvent,
   type WriteToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
-import { DEFAULT_TIMEOUT_MS, loadConfig } from "./config.ts";
+import { DEFAULT_TIMEOUT_MS, loadConfig, type HooksConfig } from "./config.ts";
 import { defaultDeps, type HooksDeps } from "./deps.ts";
 import { matchesAny, relativePath, shellQuote } from "./match.ts";
 
@@ -34,6 +36,12 @@ interface HooksState {
   running: boolean;
   status: HookStatus | null;
   widget: { invalidate(): void } | null;
+}
+
+interface ConfigState {
+  loaded: boolean;
+  config: HooksConfig | null;
+  error: string | null;
 }
 
 type StatusKind = "running" | "complete" | "failed";
@@ -49,6 +57,8 @@ const createState = (): HooksState => ({
   status: null,
   widget: null,
 });
+
+const createConfigState = (): ConfigState => ({ loaded: false, config: null, error: null });
 
 const isPathToolCall = (event: ToolCallEvent): event is EditToolCallEvent | WriteToolCallEvent =>
   isToolCallEventType("edit", event) || isToolCallEventType("write", event);
@@ -71,10 +81,24 @@ const tail = (text: string, max = 300): string => {
   return trimmed.length <= max ? trimmed : trimmed.slice(-max);
 };
 
+/** Combined hook output: stdout and stderr, whichever the hook wrote to. */
+const outputOf = (result: ExecResult): string => {
+  const stdout = result.stdout.trim();
+  const stderr = result.stderr.trim();
+  if (stdout === "") return stderr;
+  if (stderr === "") return stdout;
+  return `${stdout}\n${stderr}`;
+};
+
 const describeFailure = (result: ExecResult): string => {
   const prefix = result.killed ? "Hook timed out" : `Hook failed (exit ${result.code})`;
-  const output = tail(result.stdout);
+  const output = tail(outputOf(result));
   return output === "" ? prefix : `${prefix}: ${output}`;
+};
+
+const describeError = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  return `Hook error: ${message}`;
 };
 
 const statusColor = (kind: StatusKind): "success" | "error" | "dim" =>
@@ -93,21 +117,31 @@ const updateStatus = (state: HooksState, status: HookStatus | null): void => {
 };
 
 export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = defaultDeps(pi)): void => {
-  const { config, error } = loadConfig(deps);
-  if (error) {
-    pi.on("session_start", (_event, ctx) => ctx.ui.notify(error, "warning"));
-    return;
-  }
-  if (!config) return;
-
   const state = createState();
-  const settled = config.agent_settled;
-  const dirtyPatterns = settled && settled.when === "dirty" ? settled.paths : [];
-  if (settled?.status) {
-    // A widget gives the hooks status its own section; setStatus texts all
-    // share one footer line with no key labels.
-    pi.on("session_start", (_event, ctx) => {
-      updateStatus(state, null);
+  const configState = createConfigState();
+
+  // The config path resolves against the session cwd, which only exists on
+  // the first event - so the config loads lazily, once per extension lifetime.
+  const ensureConfig = (cwd: string): void => {
+    if (configState.loaded) return;
+    configState.loaded = true;
+    const loaded = loadConfig(deps, cwd);
+    configState.config = loaded.config;
+    configState.error = loaded.error;
+  };
+
+  pi.on("session_start", (_event, ctx) => {
+    ensureConfig(ctx.cwd);
+    if (configState.error) {
+      ctx.ui.notify(configState.error, "warning");
+      return;
+    }
+    if (!configState.config) return;
+
+    updateStatus(state, null);
+    if (configState.config.agent_settled?.status) {
+      // A widget gives the hooks status its own section; setStatus texts all
+      // share one footer line with no key labels.
       ctx.ui.setWidget(
         "hooks",
         (tui, theme) => {
@@ -120,19 +154,23 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
         },
         { placement: "belowEditor" },
       );
-    });
-  }
+    }
+  });
 
   pi.on("tool_call", async (event, ctx) => {
+    ensureConfig(ctx.cwd);
+    if (configState.error || !configState.config) return;
+
+    const settled = configState.config.agent_settled;
     if (
-      dirtyPatterns.length > 0 &&
+      settled?.when === "dirty" &&
       isPathToolCall(event) &&
-      matchesAny(relativePath(event.input.path, ctx.cwd), dirtyPatterns)
+      matchesAny(relativePath(event.input.path, ctx.cwd), settled.paths)
     ) {
       state.dirty = true;
     }
 
-    const hook = config.tool_call;
+    const hook = configState.config.tool_call;
     if (!hook) return;
     if (hook.tools && !hook.tools.includes(event.toolName)) return;
 
@@ -144,13 +182,16 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       deps,
     );
     if (result.killed || result.code !== 0) {
-      return { block: true, reason: result.stdout.trim() || "Blocked by hook" };
+      return { block: true, reason: outputOf(result) || "Blocked by hook" };
     }
     return;
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    const hook = config.agent_settled;
+    ensureConfig(ctx.cwd);
+    if (configState.error || !configState.config) return;
+
+    const hook = configState.config.agent_settled;
     if (!hook) return;
     if (hook.when === "dirty" && !state.dirty) return;
     if (state.running) return;
@@ -158,21 +199,29 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
     const label = hook.status;
     if (label) updateStatus(state, { label, kind: "running" });
     state.running = true;
-    const result = await runHook(hook.command, "", ctx.cwd, timeoutOf(hook), deps);
-    state.running = false;
-    if (hook.when === "dirty") state.dirty = false;
-    if (label) {
-      updateStatus(state, {
-        label,
-        kind: result.killed || result.code !== 0 ? "failed" : "complete",
-      });
-    }
+    try {
+      const result = await runHook(hook.command, "", ctx.cwd, timeoutOf(hook), deps);
+      if (hook.when === "dirty") state.dirty = false;
+      if (label) {
+        updateStatus(state, {
+          label,
+          kind: result.killed || result.code !== 0 ? "failed" : "complete",
+        });
+      }
 
-    if (result.killed || result.code !== 0) {
-      ctx.ui.notify(describeFailure(result), "error");
-    } else {
-      const output = tail(result.stdout);
-      ctx.ui.notify(output === "" ? "Hook passed" : output, "info");
+      if (result.killed || result.code !== 0) {
+        ctx.ui.notify(describeFailure(result), "error");
+      } else {
+        const output = tail(outputOf(result));
+        ctx.ui.notify(output === "" ? "Hook passed" : output, "info");
+      }
+    } catch (error) {
+      // The hook never ran, so the changes stay unverified: dirty survives
+      // and the next settle retries. Only the running flag must always reset.
+      if (label) updateStatus(state, { label, kind: "failed" });
+      ctx.ui.notify(describeError(error), "error");
+    } finally {
+      state.running = false;
     }
   });
 };

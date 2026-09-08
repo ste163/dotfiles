@@ -43,9 +43,10 @@ const parseConfig = (raw: string): HooksConfig | null => {
 };
 
 export const loadConfig = (
-  deps: Pick<HooksDeps, "readFile" | "cwd">,
+  deps: Pick<HooksDeps, "readFile">,
+  cwd: string,
 ): { config: HooksConfig | null; error: string | null } => {
-  const path = join(deps.cwd(), CONFIG_DIR_NAME, "hooks.json");
+  const path = join(cwd, CONFIG_DIR_NAME, "hooks.json");
   const raw = deps.readFile(path);
   if (raw === null) return { config: null, error: null };
   const config = parseConfig(raw);

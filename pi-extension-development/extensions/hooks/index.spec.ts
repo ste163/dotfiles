@@ -41,7 +41,6 @@ const createFakeDeps = (config: string | null, results: ExecResult[] = []): Fake
   return {
     execCalls,
     readFile: () => config,
-    cwd: () => "/virtual/repo",
     exec: async (command, args, options) => {
       execCalls.push({ command, args, options });
       return results.shift() ?? { stdout: "", stderr: "", code: 0, killed: false };
@@ -156,27 +155,65 @@ const readCall = (path: string): unknown => ({ toolName: "read", input: { path }
 
 // --- Wiring ---
 
-test("registers no handlers when the config file is missing", () => {
+test("registers handlers that do nothing when the config file is missing", async () => {
   const pi = createFakePi();
-  createHooksExtension(pi as unknown as Pi, createFakeDeps(null));
-  assert.equal(pi.handlers.size, 0);
+  const deps = createFakeDeps(null);
+  createHooksExtension(pi as unknown as Pi, deps);
+  assert.deepEqual([...pi.handlers.keys()].toSorted(), [
+    "agent_settled",
+    "session_start",
+    "tool_call",
+  ]);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(deps.execCalls.length, 0);
+  assert.equal(notifications.length, 0);
 });
 
-test("registers only a session_start warning when the config is invalid", async () => {
+test("warns on session start and ignores events when the config is invalid", async () => {
   const pi = createFakePi();
-  createHooksExtension(pi as unknown as Pi, createFakeDeps("not json"));
-  assert.deepEqual([...pi.handlers.keys()], ["session_start"]);
+  const deps = createFakeDeps("not json");
+  createHooksExtension(pi as unknown as Pi, deps);
+  assert.deepEqual([...pi.handlers.keys()].toSorted(), [
+    "agent_settled",
+    "session_start",
+    "tool_call",
+  ]);
   const { ctx, notifications } = createFakeCtx();
   await callHandler(pi, "session_start", {}, ctx);
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0]?.type, "warning");
   assert.ok(notifications[0]?.message.includes("Invalid JSON"));
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(deps.execCalls.length, 0);
 });
 
-test("registers tool_call and agent_settled handlers for a valid config", () => {
+test("registers all three handlers for a valid config", () => {
   const pi = createFakePi();
   createHooksExtension(pi as unknown as Pi, createFakeDeps(FULL_CONFIG));
-  assert.deepEqual([...pi.handlers.keys()].toSorted(), ["agent_settled", "tool_call"]);
+  assert.deepEqual([...pi.handlers.keys()].toSorted(), [
+    "agent_settled",
+    "session_start",
+    "tool_call",
+  ]);
+});
+
+test("loads the config from the session cwd on the first event", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(FULL_CONFIG);
+  const readPaths: string[] = [];
+  const readFile = deps.readFile;
+  deps.readFile = (path) => {
+    readPaths.push(path);
+    return readFile(path);
+  };
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", readCall("README.md"), ctx);
+  assert.deepEqual(readPaths, ["/virtual/repo/.pi/hooks.json"]);
 });
 
 // --- tool_call: dirty tracking (first branch of the handler) ---
@@ -283,6 +320,21 @@ test("blocks with a generic reason when the hook fails silently", async () => {
   assert.equal(result.reason, "Blocked by hook");
 });
 
+test("blocks with the stderr output when the hook fails on stderr", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(FULL_CONFIG, [
+    { stdout: "", stderr: "requires macOS", code: 1, killed: false },
+  ]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  const result = (await callHandler(pi, "tool_call", bashCall("bun run build"), ctx)) as {
+    block: boolean;
+    reason: string;
+  };
+  assert.equal(result.block, true);
+  assert.equal(result.reason, "requires macOS");
+});
+
 test("blocks the tool call when the hook is killed", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(FULL_CONFIG, [{ stdout: "", stderr: "", code: 0, killed: true }]);
@@ -349,6 +401,55 @@ test("skips a second run while one is in flight", async () => {
   assert.equal(deps.execCalls.length, 1);
   gate.resolve(ok());
   await first;
+});
+
+test("resets the running flag and retries on the next settle when the hook rejects", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG);
+  deps.exec = async (command, args, options) => {
+    deps.execCalls.push({ command, args, options });
+    if (deps.execCalls.length === 1) throw new Error("spawn failed");
+    return ok("passed");
+  };
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(notifications[0]?.type, "error");
+  assert.equal(notifications[0]?.message, "Hook error: spawn failed");
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(deps.execCalls.length, 2);
+  assert.equal(notifications[1]?.message, "passed");
+});
+
+test("shows a failed status when the hook rejects", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(STATUS_CONFIG);
+  deps.exec = async (command, args, options) => {
+    deps.execCalls.push({ command, args, options });
+    throw new Error("spawn failed");
+  };
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, widgets } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+  const component = mountWidget(widgets, { requestRender: () => {} });
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.deepEqual(component.render(), [" accent:hooks  error:Verification, failed"]);
+});
+
+test("stringifies the reason when the hook rejects with a non-Error", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG);
+  deps.exec = async (command, args, options) => {
+    deps.execCalls.push({ command, args, options });
+    throw "spawn failed";
+  };
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(notifications[0]?.message, "Hook error: spawn failed");
 });
 
 const mountWidget = (widgets: WidgetMount[], tui: FakeTui): WidgetComponent => {
@@ -475,6 +576,44 @@ test("notifies a bare failure message when the hook fails silently", async () =>
   assert.equal(notifications[0]?.message, "Hook failed (exit 1)");
 });
 
+test("notifies the stderr output when the hook fails on stderr", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [
+    { stdout: "", stderr: "typecheck failed", code: 1, killed: false },
+  ]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.ok(notifications[0]?.message.includes("Hook failed (exit 1)"));
+  assert.ok(notifications[0]?.message.includes("typecheck failed"));
+});
+
+test("combines stdout and stderr in failure notifications", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [
+    { stdout: "out", stderr: "err", code: 1, killed: false },
+  ]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.ok(notifications[0]?.message.includes("out\nerr"));
+});
+
+test("notifies stderr output when the hook succeeds with warnings", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [
+    { stdout: "", stderr: "warning: deprecated", code: 0, killed: false },
+  ]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(notifications[0]?.message, "warning: deprecated");
+  assert.equal(notifications[0]?.type, "info");
+});
+
 test("notifies a timeout when the hook is killed", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [
@@ -519,10 +658,12 @@ test("runs the settled hook on every settle when no when field is set", async ()
   assert.equal(deps.execCalls.length, 2);
 });
 
-test("registers no session_start handler without a status label", () => {
+test("does not mount a widget without a status label", async () => {
   const pi = createFakePi();
   createHooksExtension(pi as unknown as Pi, createFakeDeps(FULL_CONFIG));
-  assert.deepEqual([...pi.handlers.keys()].toSorted(), ["agent_settled", "tool_call"]);
+  const { ctx, widgets } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+  assert.equal(widgets.length, 0);
 });
 
 // --- Default deps ---
@@ -533,7 +674,6 @@ test("default deps delegate exec to pi and read the real filesystem", async () =
   const result = await deps.exec("echo", ["hi"], { cwd: "/tmp" });
   assert.equal(result.code, 0);
   assert.deepEqual(pi.execCalls, [{ command: "echo", args: ["hi"], options: { cwd: "/tmp" } }]);
-  assert.equal(deps.cwd(), process.cwd());
   const source = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
   assert.ok(deps.readFile(source)?.includes("createHooksExtension"));
   assert.equal(deps.readFile("/definitely/not/a/real/file.json"), null);

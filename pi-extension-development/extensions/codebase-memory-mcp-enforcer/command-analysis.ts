@@ -15,6 +15,8 @@
  *   A bare number directly after a flag is that flag's value (`-A 8`,
  *   `--max-count 5`) and is skipped, so it never masquerades as the
  *   pattern or a target.
+ * - A grep-family segment whose targets all sit under `node_modules`
+ *   passes — third-party code, not the repo's.
  * - `cat` with a glob passes when the glob is over a dotfile dir (`.husky`,
  *   `.github`, `.pi`, ...) or ends in a docs extension.
  * - Quoted text and `--grep`-style flags are masked before the patterns
@@ -22,9 +24,11 @@
  *   trip.
  * - Anything else matching a code-search pattern blocks.
  *
- * `outsideProjectTargets` is a separate, best-effort helper for the block
- * message: it names absolute-path targets outside the git root so the
- * message can say MCP cannot search there. It does not change the verdict.
+ * `outsideProjectTargets` and `fileTargets` are separate, best-effort
+ * helpers for the block message: the first names absolute-path targets
+ * outside the git root so the message can say MCP can only search indexed
+ * repositories; the second resolves grep-family file targets to absolute
+ * paths for the stale-index note. Neither changes the verdict.
  *
  * Accepted leaks: `node -e`, `sh -c`, `awk`, `sed`, and command
  * substitution inside double quotes can hide file reads, and a numeric
@@ -32,6 +36,8 @@
  * value. This extension is a speed bump against reflexive grep/rg/find,
  * not a sandbox.
  */
+
+import { join } from "node:path";
 
 const fileExtension = (token: string): string => {
   const dot = token.lastIndexOf(".");
@@ -144,8 +150,9 @@ const segmentsBetween = (
 };
 
 // Docs/config file extensions: grep-family over named files with these
-// extensions is not code search. This list is the only knob in the exemption.
-const DOCS_EXTENSIONS: readonly string[] = [
+// extensions is not code search. This list is the only knob in the exemption
+// and feeds the exemptions note in messages.ts, so the note stays in sync.
+export const DOCS_EXTENSIONS: readonly string[] = [
   ".md",
   ".txt",
   ".json",
@@ -183,6 +190,17 @@ const isDocsOnlySearch = (segment: string): boolean => {
   const args = positionalArgs(tail);
   if (args.length < 2) return false; // a pattern alone, or no named targets
   return args.slice(1).every((target) => DOCS_EXTENSIONS.includes(fileExtension(target)));
+};
+
+/** True when every target path contains a node_modules segment. */
+const isNodeModulesSearch = (segment: string): boolean => {
+  const tokens = collapsedTokens(segment);
+  if (DISQUALIFIERS.some((disqualifier) => tokens.join(" ").includes(disqualifier))) return false;
+  const tail = searchFamilyTail(tokens);
+  if (!tail) return false;
+  const args = positionalArgs(tail);
+  if (args.length < 2) return false; // a pattern alone, or no named targets
+  return args.slice(1).every((target) => target.split("/").includes("node_modules"));
 };
 
 // grep-family tools read stdin when given no file targets; rg is excluded
@@ -235,6 +253,7 @@ export const isCodeSearchSegment = (segment: string): boolean => {
   if (isCatDotfileGlob(segment)) return false;
   if (!CODE_SEARCH_PATTERNS.some((pattern) => pattern.test(maskForMatching(segment)))) return false;
   if (isDocsOnlySearch(segment)) return false;
+  if (isNodeModulesSearch(segment)) return false;
   if (isStdinFilter(segment)) return false;
   return true;
 };
@@ -267,4 +286,30 @@ export const outsideProjectTargets = (
   return targets.filter(
     (token) => token.startsWith("/") && token !== gitRoot && !token.startsWith(gitRoot + "/"),
   );
+};
+
+/**
+ * Absolute paths of the file targets in a grep-family segment, resolved
+ * against the cwd with trailing slashes stripped, so `src/` stats as
+ * `src`. Best-effort guidance for the stale-index note, not a verdict:
+ * quoted paths with spaces and substitution-hidden paths are missed.
+ * `~` expands via homeDir.
+ */
+export const fileTargets = (segment: string, cwd: string, homeDir: string): readonly string[] => {
+  if (
+    DISQUALIFIERS.some((disqualifier) => collapsedTokens(segment).join(" ").includes(disqualifier))
+  ) {
+    return [];
+  }
+  const tokens = stripRedirections(
+    segment
+      .trim()
+      .split(/\s+/)
+      .map((token) => (token.startsWith("~/") ? homeDir + token.slice(1) : token)),
+  );
+  const tail = searchFamilyTail(positionalArgs(tokens));
+  if (!tail) return [];
+  return tail
+    .slice(1)
+    .map((target) => (target.startsWith("/") ? target : join(cwd, target)).replace(/\/+$/, ""));
 };

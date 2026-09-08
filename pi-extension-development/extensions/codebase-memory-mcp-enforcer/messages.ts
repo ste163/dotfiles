@@ -8,10 +8,17 @@
  * first. Neither → the full ladder. A naming mismatch degrades to the
  * index-first path, never to a wrong "ready" answer. When a blocked
  * segment names absolute targets outside the git root, the message adds a
- * note that MCP cannot search there.
+ * note that MCP can only search indexed repositories. When a targeted
+ * file is newer than the index db, the message adds a stale-index note
+ * with a ready-made reindex call.
  */
 
-import { outsideProjectTargets, positionalArgs, searchFamilyTail } from "./command-analysis.ts";
+import {
+  DOCS_EXTENSIONS,
+  outsideProjectTargets,
+  positionalArgs,
+  searchFamilyTail,
+} from "./command-analysis.ts";
 import { projectNameFor, type McpState } from "./mcp-state.ts";
 
 /** Strip one layer of matching quotes; an unbalanced opener means the pattern had spaces, so fall back. */
@@ -50,8 +57,10 @@ const blockHeader = (violations: readonly string[]): string =>
   "MCP FIRST — code search blocked: " + violations.map((segment) => "`" + segment + "`").join(", ");
 
 const EXEMPTIONS =
-  "Legal without the server: pipe filters over command output (e.g. `npm test | grep fail`) " +
-  "and grep-family over named docs/config files.";
+  "Legal without the server: pipe filters over command output (e.g. `npm test | grep fail`), " +
+  "grep-family over named docs/config files (" +
+  DOCS_EXTENSIONS.map((extension) => "`" + extension + "`").join(" ") +
+  "), and grep-family over `node_modules` paths.";
 
 const UNREACHABLE = "Inform the user and stop this line of work.";
 
@@ -95,12 +104,22 @@ const blockBody = (
   );
 };
 
+/** The stale-index note: which files changed after the last index, and the reindex call. */
+const staleNote = (gitRoot: string, stale: readonly string[]): string =>
+  stale.length === 0
+    ? ""
+    : "\n\nNote: " +
+      stale.map((target) => "`" + target + "`").join(", ") +
+      " changed after the last index — the index may be stale. Reindex first:\n" +
+      indexCallLine(gitRoot);
+
 /** The block message: a ready-made rewrite when the state is readable, the ladder when it is not. */
 export const blockMessage = (
   gitRoot: string,
   violations: readonly string[],
   state: McpState,
   homeDir: string,
+  stale: readonly string[],
 ): string => {
   const project = projectNameFor(gitRoot);
   const header = blockHeader(violations);
@@ -110,13 +129,15 @@ export const blockMessage = (
       ? ""
       : "\n\nNote: this search targets files outside the project (" +
         outside.map((target) => "`" + target + "`").join(", ") +
-        "). codebase-memory-mcp only indexes this repo, so MCP cannot search there. " +
+        "). codebase-memory-mcp can only search indexed repositories — check " +
+        'mcp({ tool: "codebase-memory-mcp_list_projects" }). ' +
         "Use `read` for known paths, or run the search in a shell outside pi.";
   return (
     header +
     "\n\n" +
     blockBody(gitRoot, violations, state, project) +
     outsideNote +
+    staleNote(gitRoot, stale) +
     "\n\n" +
     EXEMPTIONS
   );
@@ -126,8 +147,8 @@ export const blockMessage = (
 export const reminderMessage = (gitRoot: string, state: McpState): string => {
   const project = projectNameFor(gitRoot);
   const rule =
-    " Know the path → read. Filtering output or grepping named docs/config files → bash grep is legal. " +
-    "Targets outside the project → MCP cannot search there; use read or a shell outside pi.";
+    " Know the path → read. Filtering output, grepping named docs/config files, or grepping node_modules paths → bash grep is legal. " +
+    "Targets outside the project → MCP can only search indexed repositories (check list_projects); use read or a shell outside pi.";
   if (state.registered && state.indexed) {
     return (
       'MCP READY — project "' +

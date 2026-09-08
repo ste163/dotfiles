@@ -41,9 +41,11 @@ const createFakeDeps = (
   cwd = "/virtual/repo",
   files: Record<string, string> = {},
   homeDir = "/virtual/home",
+  stats: Record<string, { mtimeMs: number; isFile: boolean }> = {},
 ): CodebaseMemoryMcpEnforcerDeps => ({
   existsSync: (path) => existingPaths.includes(path),
   readFile: (path) => files[path] ?? "",
+  statSync: (path) => stats[path] ?? { mtimeMs: 0, isFile: true },
   cwd: () => cwd,
   homeDir: () => homeDir,
 });
@@ -221,6 +223,13 @@ test("blocks searches with code or directory targets", async () => {
   await blocked("git grep foo", deps);
 });
 
+test("still blocks searches with mixed or non-node_modules targets", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git"]);
+  await blocked("grep -rn foo node_modules src/", deps);
+  await blocked("grep -rn foo .", deps);
+  await blocked("grep foo node_modules/x $(echo y)", deps);
+});
+
 test("blocks -e and -f searches whose value is the pattern", async () => {
   const deps = createFakeDeps(["/virtual/repo/.git"]);
   await blocked("grep -e pattern src/", deps);
@@ -260,7 +269,8 @@ test("adds outside-project guidance when a blocked search targets absolute paths
   const reason = await blocked("grep -rn foo /outside/dir", deps);
   assert.ok(reason.includes("outside the project"));
   assert.ok(reason.includes("`/outside/dir`"));
-  assert.ok(reason.includes("MCP cannot search there"));
+  assert.ok(reason.includes("can only search indexed repositories"));
+  assert.ok(reason.includes("codebase-memory-mcp_list_projects"));
   const findReason = await blocked("find /outside -name x", deps);
   assert.ok(findReason.includes("`/outside`"));
 });
@@ -296,6 +306,130 @@ test("names outside targets after -e patterns", async () => {
   });
   const reason = await blocked("grep -e foo /outside", deps);
   assert.ok(reason.includes("`/outside`"));
+});
+
+test("omits the stale note when the index db is missing", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git", CONFIG_PATH], "/virtual/repo", {
+    [CONFIG_PATH]: REGISTERED_MCP,
+  });
+  const reason = await blocked("grep -rn foo src/", deps);
+  assert.ok(!reason.includes("changed after the last index"));
+});
+
+test("omits the stale note when substitution hides the targets or the segment is find", async () => {
+  const deps = createFakeDeps(
+    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH],
+    "/virtual/repo",
+    { [CONFIG_PATH]: REGISTERED_MCP },
+    "/virtual/home",
+    {
+      [DB_PATH]: { mtimeMs: 100, isFile: true },
+      "/virtual/repo/src": { mtimeMs: 200, isFile: true },
+    },
+  );
+  const reason = await blocked("grep foo src/ $(echo x)", deps);
+  assert.ok(!reason.includes("changed after the last index"));
+  const findReason = await blocked("find . -name x", deps);
+  assert.ok(!findReason.includes("changed after the last index"));
+});
+
+test("resolves ~ targets against the home dir for the stale check", async () => {
+  const dbPath = "/virtual/.cache/codebase-memory-mcp/virtual-repo.db";
+  const deps = createFakeDeps(
+    ["/virtual/repo/.git", dbPath, CONFIG_PATH, "/virtual/repo/src"],
+    "/virtual/repo",
+    { [CONFIG_PATH]: REGISTERED_MCP },
+    "/virtual",
+    {
+      [dbPath]: { mtimeMs: 100, isFile: true },
+      "/virtual/repo/src": { mtimeMs: 200, isFile: true },
+    },
+  );
+  const reason = await blocked("grep -rn foo ~/repo/src", deps);
+  assert.ok(reason.includes("`/virtual/repo/src` changed after the last index"));
+});
+
+test("omits the stale note for targets outside the git root", async () => {
+  const deps = createFakeDeps(
+    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/outside/src"],
+    "/virtual/repo",
+    { [CONFIG_PATH]: REGISTERED_MCP },
+    "/virtual/home",
+    {
+      [DB_PATH]: { mtimeMs: 100, isFile: true },
+      "/outside/src": { mtimeMs: 200, isFile: true },
+    },
+  );
+  const reason = await blocked("grep -rn foo /outside/src", deps);
+  assert.ok(!reason.includes("changed after the last index"));
+});
+
+test("omits the stale note for missing files, directory targets, and unrecorded stats", async () => {
+  const deps = createFakeDeps(
+    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/virtual/repo/src"],
+    "/virtual/repo",
+    { [CONFIG_PATH]: REGISTERED_MCP },
+    "/virtual/home",
+    {
+      [DB_PATH]: { mtimeMs: 100, isFile: true },
+      "/virtual/repo/src": { mtimeMs: 200, isFile: false },
+    },
+  );
+  const missingReason = await blocked("grep -rn foo missing.ts", deps);
+  assert.ok(!missingReason.includes("changed after the last index"));
+  const reason = await blocked("grep -rn foo src/", deps);
+  assert.ok(!reason.includes("changed after the last index"));
+  const unrecordedDeps = createFakeDeps(
+    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/virtual/repo/src"],
+    "/virtual/repo",
+    { [CONFIG_PATH]: REGISTERED_MCP },
+    "/virtual/home",
+    { [DB_PATH]: { mtimeMs: 100, isFile: true } },
+  );
+  const unrecordedReason = await blocked("grep -rn foo src/", unrecordedDeps);
+  assert.ok(!unrecordedReason.includes("changed after the last index"));
+});
+
+test("omits the stale note when the file is older than the index db", async () => {
+  const deps = createFakeDeps(
+    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/virtual/repo/src"],
+    "/virtual/repo",
+    { [CONFIG_PATH]: REGISTERED_MCP },
+    "/virtual/home",
+    {
+      [DB_PATH]: { mtimeMs: 100, isFile: true },
+      "/virtual/repo/src": { mtimeMs: 50, isFile: true },
+    },
+  );
+  const reason = await blocked("grep -rn foo src/", deps);
+  assert.ok(!reason.includes("changed after the last index"));
+});
+
+test("adds a stale-index note when a targeted file is newer than the index db", async () => {
+  const deps = createFakeDeps(
+    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/virtual/repo/src"],
+    "/virtual/repo",
+    { [CONFIG_PATH]: REGISTERED_MCP },
+    "/virtual/home",
+    {
+      [DB_PATH]: { mtimeMs: 100, isFile: true },
+      "/virtual/repo/src": { mtimeMs: 200, isFile: true },
+    },
+  );
+  const reason = await blocked("grep -rn foo src/", deps);
+  assert.ok(reason.includes("`/virtual/repo/src` changed after the last index"));
+  assert.ok(reason.includes("Reindex first:"));
+  assert.ok(reason.includes('repo_path: "/virtual/repo", mode: "fast"'));
+  const absoluteReason = await blocked("grep -rn foo /virtual/repo/src", deps);
+  assert.ok(absoluteReason.includes("`/virtual/repo/src` changed after the last index"));
+});
+
+test("lists the implemented carve-outs in the exemptions note", async () => {
+  const reason = await blocked("grep -rn foo src/", createFakeDeps(["/virtual/repo/.git"]));
+  assert.ok(reason.includes("Legal without the server"));
+  assert.ok(reason.includes("`node_modules` paths"));
+  assert.ok(reason.includes("`.md`"));
+  assert.ok(reason.includes("`.json`"));
 });
 
 // --- Allows ---
@@ -336,6 +470,23 @@ test("allows grep-family over named docs or config files", async () => {
   await allowed("rg -i pattern README.md docs/notes.txt", deps);
   await allowed("git grep 'pattern' -- '*.md'", deps);
   await allowed("git grep pattern README.md docs/notes.txt", deps);
+});
+
+test("allows the exact docs grep from the session finding", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git"]);
+  await allowed(
+    'grep -n "bun test" AGENTS.md README.md plan.md .pi/prompts/test-generator.md',
+    deps,
+  );
+});
+
+test("allows grep-family over node_modules paths", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git"]);
+  await allowed("grep -rn foo node_modules/pi-lens/dist", deps);
+  await allowed("rg foo /virtual/repo/node_modules/x", deps);
+  await allowed("grep foo node_modules/a node_modules/b", deps);
+  await allowed("git grep foo -- node_modules/x", deps);
+  await allowed("grep foo node_modules/x 2>/dev/null", deps);
 });
 
 test("allows -e and -f over named docs files", async () => {
@@ -456,6 +607,9 @@ test("default deps read the real filesystem", () => {
   assert.equal(defaultDeps.homeDir(), homedir());
   const extensionSource = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
   assert.ok(defaultDeps.readFile(extensionSource).includes("codebase-memory-mcp"));
+  const dotStats = defaultDeps.statSync(".");
+  assert.equal(dotStats.isFile, false);
+  assert.equal(typeof dotStats.mtimeMs, "number");
 });
 
 test("prepends the READY reminder with the decision rule when indexed", async () => {
@@ -474,7 +628,9 @@ test("prepends the READY reminder with the decision rule when indexed", async ()
   assert.ok(result.systemPrompt.includes("codebase-memory-mcp_search_code"));
   assert.ok(result.systemPrompt.includes("Know the path → read"));
   assert.ok(result.systemPrompt.includes("bash grep is legal"));
+  assert.ok(result.systemPrompt.includes("node_modules"));
   assert.ok(result.systemPrompt.includes("outside the project"));
+  assert.ok(result.systemPrompt.includes("list_projects"));
   assert.ok(result.systemPrompt.endsWith("BASE PROMPT"));
 });
 
