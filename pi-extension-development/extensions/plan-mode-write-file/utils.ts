@@ -104,8 +104,9 @@ export const isSafeCommand = (command: string): boolean => {
 export const DEFAULT_PLAN_FILE_NAME = "plan.md";
 
 // The plan file always lives in the session cwd, so directory parts a user
-// types are discarded rather than honored.
-export const toBaseName = (path: string): string => path.split(/[/\\]/).pop() ?? path;
+// types are discarded rather than honored. split() always yields at least
+// one element, so pop() is defined.
+export const toBaseName = (path: string): string => path.split(/[/\\]/).pop() as string;
 
 export const withMdExt = (name: string): string => (/\.[^./\\]+$/.test(name) ? name : `${name}.md`);
 
@@ -149,7 +150,8 @@ export const extractTodoItems = (message: string): TodoItem[] => {
 
   return Array.from(planSection.matchAll(numberedPattern))
     .map((match) =>
-      (match[2] ?? "")
+      // SAFETY: the regex requires ([^*\n]+) to match, so group 2 is present.
+      (match[2] as string)
         .trim()
         .replace(/\*{1,2}$/, "")
         .trim(),

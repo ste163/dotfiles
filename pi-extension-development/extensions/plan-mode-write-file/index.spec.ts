@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { createPlanModeWriteFileExtension } from "./index.ts";
+import planModeWriteFileExtension, { createPlanModeWriteFileExtension } from "./index.ts";
 import type { PlanModeWriteFileDeps } from "./deps.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown | Promise<unknown>;
@@ -561,6 +561,30 @@ test("injects the execution context before an agent starts while executing", asy
   };
   assert.equal(result.message.customType, "plan-write-file-execution-context");
   assert.match(result.message.content, /1\. a/);
+});
+
+test("execution context lists only unfinished steps", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode-write-file", {
+      enabled: false,
+      todos: [
+        { step: 1, text: "a", completed: true },
+        { step: 2, text: "b", completed: false },
+      ],
+      executing: true,
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  const result = (await callHandler(pi, "before_agent_start", {}, ctx)) as {
+    message: { customType: string; content: string };
+  };
+  assert.equal(result.message.customType, "plan-write-file-execution-context");
+  assert.doesNotMatch(result.message.content, /1\. a/);
+  assert.match(result.message.content, /2\. b/);
 });
 
 test("injects nothing before an agent starts while off", async () => {
@@ -1132,4 +1156,18 @@ test("leaves plan mode off without a flag or persisted entry", async () => {
     ctx,
   );
   assert.equal(write, undefined);
+});
+
+// --- default export ---
+
+test("the default export registers the extension with default deps", () => {
+  const pi = createFakePi();
+  planModeWriteFileExtension(
+    pi as unknown as Parameters<typeof createPlanModeWriteFileExtension>[0],
+  );
+
+  assert.ok(pi.handlers["session_start"]?.length);
+  assert.ok(pi.commands["plan-write-file"]);
+  assert.ok(pi.commands["plan-write-file-todos"]);
+  assert.ok(pi.shortcuts.length > 0);
 });

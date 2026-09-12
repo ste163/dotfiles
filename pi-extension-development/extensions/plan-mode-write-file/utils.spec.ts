@@ -102,6 +102,10 @@ test("extractDoneSteps", async (t) => {
   await t.test("returns empty array when there are no markers", () => {
     assert.deepEqual(extractDoneSteps("nothing done yet"), []);
   });
+
+  await t.test("drops markers whose step number overflows to Infinity", () => {
+    assert.deepEqual(extractDoneSteps(`[DONE:${"9".repeat(400)}]`), []);
+  });
 });
 
 test("markCompletedSteps", async (t) => {

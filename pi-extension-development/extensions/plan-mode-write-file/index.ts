@@ -347,6 +347,7 @@ export const createPlanModeWriteFileExtension = (
     }
 
     const isResume = planModeEntry !== undefined;
+    let persisted = false;
     if (isResume && state.executing && state.todos.length > 0) {
       // Scan only messages after the last execute marker, so [DONE:n] tags
       // from previous plans never leak into the restored list.
@@ -375,6 +376,7 @@ export const createPlanModeWriteFileExtension = (
         if (chosen !== null) {
           state.planFileName = chosen;
           persistState();
+          persisted = true;
         } else {
           state.enabled = false;
         }
@@ -382,7 +384,14 @@ export const createPlanModeWriteFileExtension = (
         // Headless run: no UI to prompt, so fall back silently.
         state.planFileName = DEFAULT_PLAN_FILE_NAME;
         persistState();
+        persisted = true;
       }
+    }
+
+    // A resumed session always re-persists its state, so the entry log
+    // reflects the restored (and possibly re-scanned) plan.
+    if (isResume && !persisted) {
+      persistState();
     }
 
     updateStatus(ctx);
