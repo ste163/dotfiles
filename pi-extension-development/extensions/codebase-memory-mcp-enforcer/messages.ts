@@ -62,6 +62,8 @@ const EXEMPTIONS =
   DOCS_EXTENSIONS.map((extension) => "`" + extension + "`").join(" ") +
   "), and grep-family over `node_modules` paths.";
 
+const REGEX_NOTE = "Patterns match literally; pass `regex: true` for alternation (`foo|bar`).";
+
 const UNREACHABLE = "Inform the user and stop this line of work.";
 
 const blockBody = (
@@ -108,9 +110,9 @@ const blockBody = (
 const staleNote = (gitRoot: string, stale: readonly string[]): string =>
   stale.length === 0
     ? ""
-    : "\n\nNote: " +
+    : "\n\n" +
       stale.map((target) => "`" + target + "`").join(", ") +
-      " changed after the last index — the index may be stale. Reindex first:\n" +
+      " changed after the last index — search results for these files will be stale. Reindex before searching:\n" +
       indexCallLine(gitRoot);
 
 /** The block message: a ready-made rewrite when the state is readable, the ladder when it is not. */
@@ -136,6 +138,8 @@ export const blockMessage = (
     header +
     "\n\n" +
     blockBody(gitRoot, violations, state, project) +
+    "\n\n" +
+    REGEX_NOTE +
     outsideNote +
     staleNote(gitRoot, stale) +
     "\n\n" +
@@ -148,6 +152,7 @@ export const reminderMessage = (gitRoot: string, state: McpState): string => {
   const project = projectNameFor(gitRoot);
   const rule =
     " Know the path → read. Filtering output, grepping named docs/config files, or grepping node_modules paths → bash grep is legal. " +
+    "awk/sed over files is code search too — use MCP search or read. " +
     "Targets outside the project → MCP can only search indexed repositories (check list_projects); use read or a shell outside pi.";
   if (state.registered && state.indexed) {
     return (

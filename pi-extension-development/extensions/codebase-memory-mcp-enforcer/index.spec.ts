@@ -123,6 +123,8 @@ test("blocks with a ready-made rewrite when the server is registered and the rep
       'mcp({ tool: "codebase-memory-mcp_search_code", args: { pattern: "session_start", project: "virtual-repo", mode: "files" } })',
     ),
   );
+  assert.ok(reason.includes("Patterns match literally"));
+  assert.ok(reason.includes("`regex: true`"));
   assert.ok(!reason.includes("Not connected?"));
   assert.ok(!reason.includes("codebase-memory-mcp_list_projects"));
 });
@@ -418,7 +420,8 @@ test("adds a stale-index note when a targeted file is newer than the index db", 
   );
   const reason = await blocked("grep -rn foo src/", deps);
   assert.ok(reason.includes("`/virtual/repo/src` changed after the last index"));
-  assert.ok(reason.includes("Reindex first:"));
+  assert.ok(reason.includes("search results for these files will be stale"));
+  assert.ok(reason.includes("Reindex before searching:"));
   assert.ok(reason.includes('repo_path: "/virtual/repo", mode: "fast"'));
   const absoluteReason = await blocked("grep -rn foo /virtual/repo/src", deps);
   assert.ok(absoluteReason.includes("`/virtual/repo/src` changed after the last index"));
@@ -628,6 +631,7 @@ test("prepends the READY reminder with the decision rule when indexed", async ()
   assert.ok(result.systemPrompt.includes("codebase-memory-mcp_search_code"));
   assert.ok(result.systemPrompt.includes("Know the path → read"));
   assert.ok(result.systemPrompt.includes("bash grep is legal"));
+  assert.ok(result.systemPrompt.includes("awk/sed over files is code search"));
   assert.ok(result.systemPrompt.includes("node_modules"));
   assert.ok(result.systemPrompt.includes("outside the project"));
   assert.ok(result.systemPrompt.includes("list_projects"));
