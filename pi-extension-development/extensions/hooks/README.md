@@ -11,7 +11,8 @@ model of the Copilot CLI and Claude Code.
 3. A `tool_call` hook runs before a tool executes. A non-zero exit blocks
    the call.
 4. An `agent_settled` hook runs when the agent settles. A failure shows a
-   notification. It does not block the session.
+   notification and is injected into the session, so the agent sees the
+   output and starts a turn to fix it. It does not block the session.
 5. A bad config disables the hooks and shows a warning at session start.
 
 ## Config
@@ -56,10 +57,11 @@ stderr become the reason, truncated to 300 characters.
 | `timeout` | Time limit in milliseconds. Default: 120000.                                                                       |
 
 A failure shows a notification with the hook output, truncated to 300
-characters. It does not block the session. A settle that fires while the
-hook is still running is skipped. With `"dirty"`, the flag clears after
-the hook runs, success or failure. If the hook never ran, the flag stays
-and the next settle retries.
+characters. It does not block the session. The failure is also injected
+into the session, so the agent sees the output and starts a turn to fix
+it. A settle that fires while the hook is still running is skipped. With
+`"dirty"`, the flag clears after the hook runs, success or failure. If
+the hook never ran, the flag stays and the next settle retries.
 
 ## Recipes
 

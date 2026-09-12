@@ -137,9 +137,9 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
     if (!configState.config) return;
 
     updateStatus(state, null);
-    if (configState.config.agent_settled?.status) {
-      // A widget gives the hooks status its own section; setStatus texts all
-      // share one footer line with no key labels.
+    // A widget gives the hooks status its own section; setStatus texts all
+    // share one footer line with no key labels.
+    if (configState.config.agent_settled?.status)
       ctx.ui.setWidget(
         "hooks",
         (tui, theme) => {
@@ -152,7 +152,6 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
         },
         { placement: "belowEditor" },
       );
-    }
   });
 
   pi.on("tool_call", async (event, ctx) => {
@@ -164,9 +163,8 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       settled?.when === "dirty" &&
       isPathToolCall(event) &&
       matchesAny(relativePath(event.input.path, ctx.cwd), settled.paths)
-    ) {
+    )
       state.dirty = true;
-    }
 
     const hook = configState.config.tool_call;
     if (!hook) return;
@@ -179,9 +177,8 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       timeoutOf(hook),
       deps,
     );
-    if (result.killed || result.code !== 0) {
+    if (result.killed || result.code !== 0)
       return { block: true, reason: tail(outputOf(result)) || "Blocked by hook" };
-    }
     return;
   });
 
@@ -200,15 +197,19 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
     try {
       const result = await runHook(hook.command, "", ctx.cwd, timeoutOf(hook), deps);
       if (hook.when === "dirty") state.dirty = false;
-      if (label) {
+      if (label)
         updateStatus(state, {
           label,
           kind: result.killed || result.code !== 0 ? "failed" : "complete",
         });
-      }
 
       if (result.killed || result.code !== 0) {
-        ctx.ui.notify(describeFailure(result), "error");
+        const failure = describeFailure(result);
+        ctx.ui.notify(failure, "error");
+        pi.sendMessage(
+          { customType: "hooks-failure", content: failure, display: true },
+          { deliverAs: "steer", triggerTurn: true },
+        );
       } else {
         const output = tail(outputOf(result));
         ctx.ui.notify(output === "" ? "Hook passed" : output, "info");
@@ -217,7 +218,12 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       // The hook never ran, so the changes stay unverified: dirty survives
       // and the next settle retries. Only the running flag must always reset.
       if (label) updateStatus(state, { label, kind: "failed" });
-      ctx.ui.notify(describeError(error), "error");
+      const failure = describeError(error);
+      ctx.ui.notify(failure, "error");
+      pi.sendMessage(
+        { customType: "hooks-failure", content: failure, display: true },
+        { deliverAs: "steer", triggerTurn: true },
+      );
     } finally {
       state.running = false;
     }

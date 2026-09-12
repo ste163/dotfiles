@@ -10,22 +10,38 @@ type Handler = (event: unknown, ctx: unknown) => unknown | Promise<unknown>;
 interface FakePi {
   handlers: Record<string, Handler[]>;
   execCalls: { command: string; args: string[]; options: unknown }[];
+  sentMessages: {
+    message: { customType: string; content: string; display: boolean };
+    options: unknown;
+  }[];
   on(event: string, handler: Handler): void;
   exec(command: string, args: string[], options: unknown): Promise<ExecResult>;
+  sendMessage(
+    message: { customType: string; content: string; display: boolean },
+    options: unknown,
+  ): void;
 }
 
 const createFakePi = (): FakePi => {
   const handlers: Record<string, Handler[]> = {};
   const execCalls: { command: string; args: string[]; options: unknown }[] = [];
+  const sentMessages: {
+    message: { customType: string; content: string; display: boolean };
+    options: unknown;
+  }[] = [];
   return {
     handlers,
     execCalls,
+    sentMessages,
     on(event, handler) {
       handlers[event] = [...(handlers[event] ?? []), handler];
     },
     exec(command, args, options) {
       execCalls.push({ command, args, options });
       return Promise.resolve({ stdout: "", stderr: "", code: 0, killed: false });
+    },
+    sendMessage(message, options) {
+      sentMessages.push({ message, options });
     },
   };
 };
@@ -226,6 +242,7 @@ test("marks dirty when an edit touches a matching path, then clears it after a s
   assert.equal(deps.execCalls.length, 1);
   assert.equal(notifications[0]?.message, "passed");
   assert.equal(notifications[0]?.type, "info");
+  assert.equal(pi.sentMessages.length, 0);
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.equal(deps.execCalls.length, 1);
 });
@@ -429,6 +446,7 @@ test("resets the running flag and retries on the next settle when the hook rejec
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.equal(notifications[0]?.type, "error");
   assert.equal(notifications[0]?.message, "Hook error: spawn failed");
+  assert.equal(pi.sentMessages[0]?.message.content, "Hook error: spawn failed");
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.equal(deps.execCalls.length, 2);
   assert.equal(notifications[1]?.message, "passed");
@@ -574,6 +592,13 @@ test("notifies an error and clears dirty when the hook fails", async () => {
   assert.equal(notifications[0]?.type, "error");
   assert.ok(notifications[0]?.message.includes("Hook failed (exit 1)"));
   assert.ok(notifications[0]?.message.includes("typecheck failed"));
+  assert.equal(pi.sentMessages.length, 1);
+  assert.deepEqual(pi.sentMessages[0]?.message, {
+    customType: "hooks-failure",
+    content: "Hook failed (exit 1): typecheck failed",
+    display: true,
+  });
+  assert.deepEqual(pi.sentMessages[0]?.options, { deliverAs: "steer", triggerTurn: true });
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.equal(deps.execCalls.length, 1);
 });
@@ -636,6 +661,7 @@ test("notifies a timeout when the hook is killed", async () => {
   await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.equal(notifications[0]?.message, "Hook timed out");
+  assert.equal(pi.sentMessages[0]?.message.content, "Hook timed out");
 });
 
 test("notifies Hook passed when the hook succeeds silently", async () => {

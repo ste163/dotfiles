@@ -24,24 +24,17 @@ export interface HooksConfig {
 export const DEFAULT_TIMEOUT_MS = 120_000;
 
 const validateConfig = (config: HooksConfig, path: string): string | null => {
-  if (typeof config !== "object") {
-    return `Invalid config in ${path}`;
-  }
-  if (config.tool_call && !config.tool_call.command) {
+  if (typeof config !== "object") return `Invalid config in ${path}`;
+  if (config.tool_call && !config.tool_call.command)
     return `"tool_call" requires a "command" in ${path}`;
-  }
   const settled = config.agent_settled as
     | { command?: string; when?: string; paths?: string[] }
     | undefined;
-  if (settled && !settled.command) {
-    return `"agent_settled" requires a "command" in ${path}`;
-  }
-  if (settled && settled.when !== undefined && settled.when !== "dirty") {
+  if (settled && !settled.command) return `"agent_settled" requires a "command" in ${path}`;
+  if (settled && settled.when !== undefined && settled.when !== "dirty")
     return `Unsupported "when" value in ${path}: ${settled.when}`;
-  }
-  if (settled && settled.when === "dirty" && (!settled.paths || settled.paths.length === 0)) {
+  if (settled && settled.when === "dirty" && (!settled.paths || settled.paths.length === 0))
     return `"when": "dirty" requires a non-empty "paths" list in ${path}`;
-  }
   return null;
 };
 

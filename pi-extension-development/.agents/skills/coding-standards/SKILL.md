@@ -20,6 +20,9 @@ description: TypeScript coding standards and testing conventions for this projec
   private. Don't export "just in case."
 - **Prefer ternaries** over if/else for simple conditional expressions, and
   **prefer built-ins** (`.map`, `.reduce`, `.filter`, etc.) over manual loops.
+- **One-line `if` statements take no braces.** `if (x) return;` — not
+  `if (x) { return; }`. Braces only when the body has more than one
+  statement.
 - **No `Set` or `Map` without a real, verifiable reason.** For membership
   checks, use a `readonly string[]` with `.includes()`. For key-value
   storage, use a plain object (`Record<string, T>`) or an array of pairs.
