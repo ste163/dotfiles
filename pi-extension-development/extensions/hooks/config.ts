@@ -1,0 +1,61 @@
+import { join } from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import type { HooksDeps } from "./deps.ts";
+
+/** Hook that runs before a tool executes. A non-zero exit blocks the call. */
+interface ToolCallHookConfig {
+  command: string;
+  /** Only run for these tool names. Default: every tool. */
+  tools?: string[];
+  /** Timeout in milliseconds. Default: 120000. */
+  timeout?: number;
+}
+
+/** Hook that runs when the agent settles. */
+type AgentSettledHookConfig =
+  | { command: string; timeout?: number; status?: string; when?: never }
+  | { command: string; timeout?: number; status?: string; when: "dirty"; paths: string[] };
+
+export interface HooksConfig {
+  tool_call?: ToolCallHookConfig;
+  agent_settled?: AgentSettledHookConfig;
+}
+
+export const DEFAULT_TIMEOUT_MS = 120_000;
+
+const validateConfig = (config: HooksConfig, path: string): string | null => {
+  if (typeof config !== "object") return `Invalid config in ${path}`;
+  if (config.tool_call && !config.tool_call.command)
+    return `"tool_call" requires a "command" in ${path}`;
+  const settled = config.agent_settled as
+    | { command?: string; when?: string; paths?: string[] }
+    | undefined;
+  if (settled && !settled.command) return `"agent_settled" requires a "command" in ${path}`;
+  if (settled && settled.when !== undefined && settled.when !== "dirty")
+    return `Unsupported "when" value in ${path}: ${settled.when}`;
+  if (settled && settled.when === "dirty" && (!settled.paths || settled.paths.length === 0))
+    return `"when": "dirty" requires a non-empty "paths" list in ${path}`;
+  return null;
+};
+
+const parseConfig = (raw: string): HooksConfig | null => {
+  try {
+    return JSON.parse(raw) as HooksConfig;
+  } catch {
+    return null;
+  }
+};
+
+export const loadConfig = (
+  deps: Pick<HooksDeps, "readFile">,
+  cwd: string,
+): { config: HooksConfig | null; error: string | null } => {
+  const path = join(cwd, CONFIG_DIR_NAME, "hooks.json");
+  const raw = deps.readFile(path);
+  if (raw === null) return { config: null, error: null };
+  const config = parseConfig(raw);
+  if (!config) return { config: null, error: `Invalid JSON in ${path}` };
+  const error = validateConfig(config, path);
+  if (error) return { config: null, error };
+  return { config, error: null };
+};

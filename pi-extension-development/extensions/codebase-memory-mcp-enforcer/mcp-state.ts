@@ -44,3 +44,12 @@ export const mcpState = (gitRoot: string, deps: CodebaseMemoryMcpEnforcerDeps): 
     deps.existsSync(configPath) && isServerRegistered(parseJson(deps.readFile(configPath)));
   return { registered, indexed: deps.existsSync(projectDbPath(deps.homeDir(), gitRoot)) };
 };
+
+/** The index db's mtime, or null when the db is missing. */
+export const indexDbMtimeMs = (
+  gitRoot: string,
+  deps: CodebaseMemoryMcpEnforcerDeps,
+): number | null => {
+  const dbPath = projectDbPath(deps.homeDir(), gitRoot);
+  return deps.existsSync(dbPath) ? deps.statSync(dbPath).mtimeMs : null;
+};

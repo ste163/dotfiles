@@ -1,0 +1,15 @@
+{
+  "agent_settled": {
+    "command": "sh scripts/hooks/verify.sh",
+    "when": "dirty",
+    "paths": [
+      "extensions/**",
+      "structure.spec.ts",
+      "package.json",
+      "tsconfig.json",
+      "node.config.json",
+      ".oxlintrc.json"
+    ],
+    "status": "Verification"
+  }
+}

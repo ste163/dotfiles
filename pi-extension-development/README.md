@@ -31,6 +31,16 @@ done — see [AGENTS.md](AGENTS.md) for the full mandatory checklist an agent
 must follow, and for the testing-approach rules (dependency injection instead
 of real disk I/O, recursion/`Promise.all` instead of disabling lint rules).
 
+## Automatic verification
+
+The `hooks` extension runs the checklist automatically. After the agent edits
+a file under `extensions/` (or a root config file), the `agent_settled` hook
+runs `scripts/hooks/verify.sh` — typecheck, lint, format:check, and test. The
+result shows in the UI; a failure does not block the session. The config is
+`.pi/hooks.json`. The hook uses `format:check`, not `format`, so it never
+rewrites files mid-session — run `npm run format` yourself when it reports a
+formatting failure.
+
 ## Adding a new extension
 
 1. Create a directory under `extensions/<name>/` with an `index.ts` entry

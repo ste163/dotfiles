@@ -1,5 +1,5 @@
 {
-  "defaultModel": "glm-5.3:cloud",
+  "defaultModel": "deepseek-v4-pro:cloud",
   "defaultProvider": "ollama",
   "defaultThinkingLevel": "max",
   "enableInstallTelemetry": false,
@@ -16,3 +16,4 @@
     "anthropicExtraUsage": false
   }
 }
+

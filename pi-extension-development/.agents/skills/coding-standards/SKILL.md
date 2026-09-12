@@ -20,10 +20,15 @@ description: TypeScript coding standards and testing conventions for this projec
   private. Don't export "just in case."
 - **Prefer ternaries** over if/else for simple conditional expressions, and
   **prefer built-ins** (`.map`, `.reduce`, `.filter`, etc.) over manual loops.
-- **No `Set` without a real, verifiable reason.** For membership checks, use
-  a `readonly string[]` with `.includes()`. At the sizes this project uses,
-  `Set.has()` buys nothing measurable. Use `reduce` for dedup/aggregation.
-  "Verifiable" means measured evidence, not taste.
+- **One-line `if` statements take no braces.** `if (x) return;` — not
+  `if (x) { return; }`. Braces only when the body has more than one
+  statement.
+- **No `Set` or `Map` without a real, verifiable reason.** For membership
+  checks, use a `readonly string[]` with `.includes()`. For key-value
+  storage, use a plain object (`Record<string, T>`) or an array of pairs.
+  At the sizes this project uses, `Set.has()` and `Map.get()` buy nothing
+  measurable. Use `reduce` for dedup/aggregation. "Verifiable" means
+  measured evidence, not taste.
 - **Fail fast.** Validate/guard early and throw/return immediately on bad
   state rather than letting it propagate.
 - **Never disable a lint rule to silence it** — fix the underlying issue
@@ -32,7 +37,12 @@ description: TypeScript coding standards and testing conventions for this projec
   restructure code freely when it improves readability/testability.
 - **Optimize for readability and testability over brevity.** More verbose
   but clearer code is preferred over clever/compact code.
-- **No `undefined`** Use (!check) instead of (check === undefined). Never return `undefined`, just return empty
+- **No `undefined`** Use (!check) instead of (check === undefined). Never
+  return `undefined`, just return empty. Never write `undefined` as a type:
+  no `prop?: undefined` (the question mark already makes the property
+  optional) and no `T | undefined` in type declarations. Use `prop?: T` for
+  optional properties, `T | null` for nullable values, and `prop?: never`
+  when a union member must forbid a property.
 - **Verbosity in naming** Do not shorten names like Compat for Compatibility. Use full names so it's easier to read.
 - **Do not use mutable data. Use functional programming.** Do not use `let` always use `const`. Use functions to get live data instead of mutations.
 - **Comments should explain concepts and the why not the code.** Code documents. A comment saying a `validate` function validates the passed in item that has type information is a pointless comment. The function's name and it's parameters explain that the function validates the argument. Do not have unnecessary comments.
