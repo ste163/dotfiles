@@ -177,11 +177,13 @@ test("registers handlers that do nothing when the config file is missing", async
     "agent_settled",
     "session_start",
     "tool_call",
+    "turn_start",
   ]);
   const { ctx, notifications } = createFakeCtx();
   await callHandler(pi, "session_start", {}, ctx);
   await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
   await callHandler(pi, "agent_settled", {}, ctx);
+  await callHandler(pi, "turn_start", {}, ctx);
   assert.equal(deps.execCalls.length, 0);
   assert.equal(notifications.length, 0);
 });
@@ -194,6 +196,7 @@ test("warns on session start and ignores events when the config is invalid", asy
     "agent_settled",
     "session_start",
     "tool_call",
+    "turn_start",
   ]);
   const { ctx, notifications } = createFakeCtx();
   await callHandler(pi, "session_start", {}, ctx);
@@ -205,13 +208,14 @@ test("warns on session start and ignores events when the config is invalid", asy
   assert.equal(deps.execCalls.length, 0);
 });
 
-test("registers all three handlers for a valid config", () => {
+test("registers all handlers for a valid config", () => {
   const pi = createFakePi();
   createHooksExtension(pi as unknown as Pi, createFakeDeps(FULL_CONFIG));
   assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
     "agent_settled",
     "session_start",
     "tool_call",
+    "turn_start",
   ]);
 });
 
@@ -495,6 +499,7 @@ test("mounts the hooks widget on session start when a status label is configured
     "agent_settled",
     "session_start",
     "tool_call",
+    "turn_start",
   ]);
   const { ctx, widgets } = createFakeCtx();
   await callHandler(pi, "session_start", {}, ctx);
@@ -579,6 +584,20 @@ test("clears the status on session start", async () => {
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.deepEqual(component.render(), [" accent:hooks  success:Verification, complete"]);
   await callHandler(pi, "session_start", {}, ctx);
+  assert.deepEqual(component.render(), []);
+});
+
+test("clears the status when a new turn starts", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(STATUS_CONFIG, [failed()]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, widgets } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+  const component = mountWidget(widgets, { requestRender: () => {} });
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.deepEqual(component.render(), [" accent:hooks  error:Verification, failed"]);
+  await callHandler(pi, "turn_start", {}, ctx);
   assert.deepEqual(component.render(), []);
 });
 

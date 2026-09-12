@@ -9,7 +9,9 @@
  *   the reason.
  * - `agent_settled`: the command runs when the agent settles. With
  *   `"when": "dirty"`, it only runs after the session edited or wrote a
- *   file matching one of the configured `paths` patterns.
+ *   file matching one of the configured `paths` patterns. A failure is
+ *   injected into the session so the agent sees it; the status widget
+ *   clears when the next turn starts.
  *
  * The config loads lazily on the first event, resolved against the session
  * cwd — never `process.cwd()`, which can diverge from it. The policy lives
@@ -153,6 +155,10 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
         { placement: "belowEditor" },
       );
   });
+
+  // A stale status (for example a failure fixed through bash, which never
+  // marks dirty) clears when the next turn starts.
+  pi.on("turn_start", () => updateStatus(state, null));
 
   pi.on("tool_call", async (event, ctx) => {
     ensureConfig(ctx.cwd);

@@ -48,20 +48,21 @@ stderr become the reason, truncated to 300 characters.
 
 ### agent_settled
 
-| Field     | Meaning                                                                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------------------ |
-| `command` | The shell command to run. No payload argument.                                                                     |
-| `when`    | `"dirty"` to run only after the session edited a matching path. Omit to run on every settle.                       |
-| `paths`   | Required with `"dirty"`. A pattern ending in `/**` matches by directory prefix. Any other pattern matches exactly. |
-| `status`  | Optional label. Shows a status widget below the editor (running, complete, failed).                                |
-| `timeout` | Time limit in milliseconds. Default: 120000.                                                                       |
+| Field     | Meaning                                                                                                                       |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `command` | The shell command to run. No payload argument.                                                                                |
+| `when`    | `"dirty"` to run only after the session edited a matching path. Omit to run on every settle.                                  |
+| `paths`   | Required with `"dirty"`. A pattern ending in `/**` matches by directory prefix. Any other pattern matches exactly.            |
+| `status`  | Optional label. Shows a status widget below the editor (running, complete, failed). The status clears when a new turn starts. |
+| `timeout` | Time limit in milliseconds. Default: 120000.                                                                                  |
 
 A failure shows a notification with the hook output, truncated to 300
 characters. It does not block the session. The failure is also injected
 into the session, so the agent sees the output and starts a turn to fix
-it. A settle that fires while the hook is still running is skipped. With
-`"dirty"`, the flag clears after the hook runs, success or failure. If
-the hook never ran, the flag stays and the next settle retries.
+it. The status widget clears when a new turn starts. A settle that fires
+while the hook is still running is skipped. With `"dirty"`, the flag
+clears after the hook runs, success or failure. If the hook never ran,
+the flag stays and the next settle retries.
 
 ## Recipes
 
