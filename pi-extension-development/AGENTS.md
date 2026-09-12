@@ -51,34 +51,41 @@ This is enforced mechanically by `structure.spec.ts` (run as part of `npm
 test`), not just documented here — but do not rely on the test alone; follow
 the rule when creating new extensions.
 
-## Mandatory checklist — run before any extension work is considered done
+## Mandatory checklist — the hook runs it, not you
 
-The `hooks` extension runs this checklist automatically after edits (config:
-`.pi/hooks.json`, script: `scripts/hooks/verify.sh`). The manual run below
-remains the final gate.
+The `hooks` extension runs the checklist automatically after edits (config:
+`.pi/hooks.json`, script: `scripts/hooks/verify.sh`). When the agent settles
+after editing a watched file (everything under `extensions/`, plus the root
+config files), the hook runs typecheck, lint, format:check, and test. The
+result shows in the UI. Do not run these commands manually. The hook is the
+gate.
 
-All of the following must pass, every time, with no exceptions:
+One manual action remains. The hook uses `format:check`, not `format`, so it
+never rewrites files mid-session. If the hook reports a formatting failure,
+run `npm run format` yourself.
+
+What the hook runs (for reference):
 
 ```sh
-npm run typecheck   # tsc --noEmit
+npm run typecheck    # tsc --noEmit
 npm run lint         # oxlint
-npm run format       # oxfmt --write
+npm run format:check # oxfmt --check
 npm test             # node --test, includes the structure.spec.ts hard-rule check
 ```
 
 - `npm run typecheck` must report zero errors.
 - `npm run lint` must report zero errors (categories enabled: `correctness`,
   `suspicious`, `perf` — real bug detection only, not style opinions).
-- `npm run format` must be run (or `npm run format:check` in CI) so committed
-  code matches oxfmt's output exactly.
+- Committed code must match oxfmt's output exactly. The hook checks this with
+  `format:check`. Run `npm run format` when it fails.
 - `npm test` must pass at 100%, and **100% test coverage is required** for
   every extension. (Coverage enforcement mechanism is still being finalized —
   see the note in the root `extension-setup.md` plan — but the expectation
   itself is not optional: every function/branch you write needs a test that
   exercises it.)
 
-Do not skip any of these steps. Do not consider a change to an extension
-complete until all four commands above have been run and pass cleanly.
+Do not consider a change to an extension complete until the hook reports a
+pass. A hook failure does not block the session, but you must fix it.
 
 ## Testing approach — read before writing tests
 
