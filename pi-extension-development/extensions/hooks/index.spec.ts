@@ -8,21 +8,20 @@ type Pi = Parameters<typeof createHooksExtension>[0];
 type Handler = (event: unknown, ctx: unknown) => unknown | Promise<unknown>;
 
 interface FakePi {
-  handlers: Map<string, Handler[]>;
+  handlers: Record<string, Handler[]>;
   execCalls: { command: string; args: string[]; options: unknown }[];
   on(event: string, handler: Handler): void;
   exec(command: string, args: string[], options: unknown): Promise<ExecResult>;
 }
 
 const createFakePi = (): FakePi => {
-  const handlers = new Map<string, Handler[]>();
+  const handlers: Record<string, Handler[]> = {};
   const execCalls: { command: string; args: string[]; options: unknown }[] = [];
   return {
     handlers,
     execCalls,
     on(event, handler) {
-      const list = handlers.get(event) ?? [];
-      handlers.set(event, [...list, handler]);
+      handlers[event] = [...(handlers[event] ?? []), handler];
     },
     exec(command, args, options) {
       execCalls.push({ command, args, options });
@@ -49,7 +48,7 @@ const createFakeDeps = (config: string | null, results: ExecResult[] = []): Fake
 
 interface Notification {
   message: string;
-  type: string | undefined;
+  type?: string;
 }
 
 interface FakeTheme {
@@ -86,7 +85,7 @@ const createFakeCtx = (): {
     cwd: "/virtual/repo",
     ui: {
       notify: (message: string, type?: string) => {
-        notifications.push({ message, type });
+        notifications.push(type ? { message, type } : { message });
       },
       setWidget: (key: string, factory: WidgetMount["factory"], options: unknown) => {
         widgets.push({ key, factory, options });
@@ -104,7 +103,7 @@ const callHandler = async (
   eventPayload: unknown,
   ctx: unknown,
 ): Promise<unknown> => {
-  const list = pi.handlers.get(event) ?? [];
+  const list = pi.handlers[event] ?? [];
   const runFrom = async (index: number): Promise<unknown> => {
     const handler = list[index];
     if (!handler) return undefined;
@@ -158,7 +157,7 @@ test("registers handlers that do nothing when the config file is missing", async
   const pi = createFakePi();
   const deps = createFakeDeps(null);
   createHooksExtension(pi as unknown as Pi, deps);
-  assert.deepEqual([...pi.handlers.keys()].toSorted(), [
+  assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
     "agent_settled",
     "session_start",
     "tool_call",
@@ -175,7 +174,7 @@ test("warns on session start and ignores events when the config is invalid", asy
   const pi = createFakePi();
   const deps = createFakeDeps("not json");
   createHooksExtension(pi as unknown as Pi, deps);
-  assert.deepEqual([...pi.handlers.keys()].toSorted(), [
+  assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
     "agent_settled",
     "session_start",
     "tool_call",
@@ -193,7 +192,7 @@ test("warns on session start and ignores events when the config is invalid", asy
 test("registers all three handlers for a valid config", () => {
   const pi = createFakePi();
   createHooksExtension(pi as unknown as Pi, createFakeDeps(FULL_CONFIG));
-  assert.deepEqual([...pi.handlers.keys()].toSorted(), [
+  assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
     "agent_settled",
     "session_start",
     "tool_call",
@@ -474,7 +473,7 @@ const mountWidget = (widgets: WidgetMount[], tui: FakeTui): WidgetComponent => {
 test("mounts the hooks widget on session start when a status label is configured", async () => {
   const pi = createFakePi();
   createHooksExtension(pi as unknown as Pi, createFakeDeps(STATUS_CONFIG));
-  assert.deepEqual([...pi.handlers.keys()].toSorted(), [
+  assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
     "agent_settled",
     "session_start",
     "tool_call",

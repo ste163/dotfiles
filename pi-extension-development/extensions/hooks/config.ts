@@ -13,7 +13,7 @@ interface ToolCallHookConfig {
 
 /** Hook that runs when the agent settles. */
 type AgentSettledHookConfig =
-  | { command: string; timeout?: number; status?: string; when?: undefined }
+  | { command: string; timeout?: number; status?: string; when?: never }
   | { command: string; timeout?: number; status?: string; when: "dirty"; paths: string[] };
 
 export interface HooksConfig {
