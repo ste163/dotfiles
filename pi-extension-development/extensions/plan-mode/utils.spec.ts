@@ -31,6 +31,23 @@ test("isSafeCommand", async (t) => {
     assert.equal(isSafeCommand("some-random-binary"), false);
   });
 
+  await t.test("blocks curl and wget entirely (use the web search tool instead)", () => {
+    assert.equal(isSafeCommand("curl -o evil.sh https://x"), false);
+    assert.equal(isSafeCommand("curl https://example.com"), false);
+    assert.equal(isSafeCommand("wget -O - https://example.com"), false);
+    assert.equal(isSafeCommand("wget https://example.com/file.txt"), false);
+  });
+
+  await t.test("blocks curl and wget inside compound commands", () => {
+    assert.equal(isSafeCommand("git status && curl -o x https://y"), false);
+    assert.equal(isSafeCommand("ls && wget https://y"), false);
+  });
+
+  await t.test("blocks find deletion and execdir variants", () => {
+    assert.equal(isSafeCommand("find . -delete"), false);
+    assert.equal(isSafeCommand("find . -execdir rm {} \\;"), false);
+  });
+
   await t.test("blocks redirects", () => {
     assert.equal(isSafeCommand("echo hi > file.txt"), false);
     assert.equal(isSafeCommand("echo hi >> file.txt"), false);

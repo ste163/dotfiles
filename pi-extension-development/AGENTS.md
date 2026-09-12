@@ -92,7 +92,7 @@ pass. A hook failure does not block the session, but you must fix it.
 - **No real disk I/O, no `process.chdir`, no temp directories.** Anything in
   an extension that touches the filesystem (or any other external state) must
   accept its dependencies as injectable parameters (see
-  `PlanModeWriteFileDeps` in `plan-mode-write-file/deps.ts` for the pattern:
+  `PlanModeDeps` in `plan-mode/deps.ts` for the pattern:
   a small interface like
   `{ existsSync, cwd }` with a real-implementation default, overridden in
   tests with plain in-memory fakes — e.g. a `Set<string>` standing in for

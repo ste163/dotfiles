@@ -101,7 +101,7 @@ kinds of content side by side:
 
 `install.sh` bridges the two: for every directory under
 `pi-extension-development/extensions/`, it creates a matching symlink inside
-`.pi/extensions/` (e.g. `.pi/extensions/plan-mode-write-file -> pi-extension-development/extensions/plan-mode-write-file`).
+`.pi/extensions/` (e.g. `.pi/extensions/plan-mode -> pi-extension-development/extensions/plan-mode`).
 The existing whole-dir symlink (`.pi/extensions -> ~/.pi/agent/extensions`) then carries
 both the package-managed state and our dev extensions through to pi automatically.
 
