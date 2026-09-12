@@ -1,15 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-/** External state the hooks extension needs (the PlanModeDeps pattern). */
+/** External state the hooks extension needs */
 export interface HooksDeps {
-  /** Run a shell command. */
   exec(
     command: string,
     args: string[],
     options: { cwd?: string; timeout?: number },
   ): Promise<ExecResult>;
-  /** Read a file, or null when it does not exist or cannot be read. */
   readFile(path: string): string | null;
 }
 

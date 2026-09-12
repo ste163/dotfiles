@@ -1,5 +1,5 @@
 /**
- * Pure utility functions for plan mode.
+ * Pure utility functions for plan-mode-write-file.
  * Extracted for testability.
  */
 
@@ -149,17 +149,16 @@ export const extractTodoItems = (message: string): TodoItem[] => {
   const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
   const numberedPattern = /^\s*(\d+)[.)]\s+\*{0,2}([^*\n]+)/gm;
 
-  return Array.from(planSection.matchAll(numberedPattern)).reduce<TodoItem[]>((items, match) => {
-    const text = (match[2] ?? "")
-      .trim()
-      .replace(/\*{1,2}$/, "")
-      .trim();
-    if (!isPlanStepCandidate(text)) return items;
-
-    const cleaned = cleanStepText(text);
-    if (cleaned.length > 3) items.push({ step: items.length + 1, text: cleaned, completed: false });
-    return items;
-  }, []);
+  return Array.from(planSection.matchAll(numberedPattern))
+    .map((match) =>
+      (match[2] ?? "")
+        .trim()
+        .replace(/\*{1,2}$/, "")
+        .trim(),
+    )
+    .flatMap((text) => (isPlanStepCandidate(text) ? [cleanStepText(text)] : []))
+    .filter((cleaned) => cleaned.length > 3)
+    .map((text, index) => ({ step: index + 1, text, completed: false }));
 };
 
 export const extractDoneSteps = (message: string): number[] =>
@@ -167,10 +166,18 @@ export const extractDoneSteps = (message: string): number[] =>
     Number.isFinite(step),
   );
 
-export const markCompletedSteps = (text: string, items: TodoItem[]): number =>
-  extractDoneSteps(text).reduce((completedCount, step) => {
-    const item = items.find((t) => t.step === step);
-    if (!item) return completedCount;
-    item.completed = true;
-    return completedCount + 1;
-  }, 0);
+/** Marks matching steps and returns the new list plus how many changed. */
+export const markCompletedSteps = (
+  text: string,
+  items: TodoItem[],
+): { todos: TodoItem[]; completed: number } => {
+  const doneSteps = extractDoneSteps(text);
+  const todos = items.map((item) =>
+    doneSteps.includes(item.step) && !item.completed ? { ...item, completed: true } : item,
+  );
+  const completed = todos.reduce(
+    (count, item, index) => (item.completed && !items[index]?.completed ? count + 1 : count),
+    0,
+  );
+  return { todos, completed };
+};

@@ -1,8 +1,8 @@
 {
   "permission": {
     "*": "allow",
-    "edit": "ask",
-    "write": "ask",
+    "edit": "allow",
+    "write": "allow",
     "mcp": "allow",
     "path": {
       "*": "allow",
@@ -11,7 +11,7 @@
       "*.env.example": "allow"
     },
     "bash": {
-      "*": "ask",
+      "*": "allow",
       "rm -rf *": "deny",
       "sudo *": "ask"
     },

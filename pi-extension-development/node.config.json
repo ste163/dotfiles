@@ -1,5 +1,5 @@
 {
   "nodeOptions": {
-    "test-coverage-exclude": ["**/*.spec.ts", "node_modules/**", "**/plan-mode/**"]
+    "test-coverage-exclude": ["**/*.spec.ts", "node_modules/**"]
   }
 }

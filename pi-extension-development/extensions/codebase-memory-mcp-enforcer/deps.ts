@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 
-/** Filesystem access the extension needs (the PlanModeDeps pattern). */
+/** Filesystem access the extension needs (the PlanModeWriteFileDeps pattern). */
 export interface CodebaseMemoryMcpEnforcerDeps {
   existsSync(path: string): boolean;
   /** Only called for paths existsSync accepted; keeps the real dep throw-free. */

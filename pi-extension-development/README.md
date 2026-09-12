@@ -76,7 +76,8 @@ when scaffolding a new extension.
 
 - No real disk I/O, no `process.chdir`, no temp directories in tests. Anything
   filesystem-dependent is written with injectable dependencies (see
-  `PlanModeDeps` in `plan-mode/index.ts` for the pattern) so tests can pass
+  `PlanModeWriteFileDeps` in `plan-mode-write-file/deps.ts` for the pattern)
+  so tests can pass
   plain in-memory fakes instead.
 - No loops with `await` inside unless the iterations are genuinely sequential
   (each depends on the previous one's result). Independent iterations use
