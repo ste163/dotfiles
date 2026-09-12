@@ -1,9 +1,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { ExecResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import createHooksExtension, { defaultDeps, type HooksDeps } from "./index.ts";
+import createHooksExtension from "./index.ts";
+import { defaultDeps, type HooksDeps } from "./deps.ts";
 
 type Pi = Parameters<typeof createHooksExtension>[0];
 type Handler = (event: unknown, ctx: unknown) => unknown | Promise<unknown>;
@@ -346,6 +345,20 @@ test("blocks the tool call when the hook is killed", async () => {
   assert.equal(result.block, true);
 });
 
+test("truncates long hook output in block reasons", async () => {
+  const pi = createFakePi();
+  const longOutput = "x".repeat(500);
+  const deps = createFakeDeps(FULL_CONFIG, [failed(longOutput)]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  const result = (await callHandler(pi, "tool_call", bashCall("bun run build"), ctx)) as {
+    block: boolean;
+    reason: string;
+  };
+  assert.equal(result.block, true);
+  assert.equal(result.reason, "x".repeat(300));
+});
+
 test("runs the tool_call hook with the input JSON as a quoted argument", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(FULL_CONFIG);
@@ -668,13 +681,19 @@ test("does not mount a widget without a status label", async () => {
 
 // --- Default deps ---
 
-test("default deps delegate exec to pi and read the real filesystem", async () => {
+test("default deps delegate exec to pi and read through the injected fs", async () => {
   const pi = createFakePi();
-  const deps = defaultDeps(pi as unknown as Pi);
+  const deps = defaultDeps(pi as unknown as Pi, {
+    existsSync: (path) => path !== "/missing.json",
+    readFileSync: (path) => {
+      if (path === "/unreadable.json") throw new Error("EACCES");
+      return '{"tool_call":{"command":"sh x.sh"}}';
+    },
+  });
   const result = await deps.exec("echo", ["hi"], { cwd: "/tmp" });
   assert.equal(result.code, 0);
   assert.deepEqual(pi.execCalls, [{ command: "echo", args: ["hi"], options: { cwd: "/tmp" } }]);
-  const source = join(dirname(fileURLToPath(import.meta.url)), "index.ts");
-  assert.ok(deps.readFile(source)?.includes("createHooksExtension"));
-  assert.equal(deps.readFile("/definitely/not/a/real/file.json"), null);
+  assert.equal(deps.readFile("/virtual/hooks.json"), '{"tool_call":{"command":"sh x.sh"}}');
+  assert.equal(deps.readFile("/missing.json"), null);
+  assert.equal(deps.readFile("/unreadable.json"), null);
 });

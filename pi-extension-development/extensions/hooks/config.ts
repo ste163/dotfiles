@@ -3,7 +3,7 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { HooksDeps } from "./deps.ts";
 
 /** Hook that runs before a tool executes. A non-zero exit blocks the call. */
-export interface ToolCallHookConfig {
+interface ToolCallHookConfig {
   command: string;
   /** Only run for these tool names. Default: every tool. */
   tools?: string[];
@@ -12,7 +12,7 @@ export interface ToolCallHookConfig {
 }
 
 /** Hook that runs when the agent settles. */
-export type AgentSettledHookConfig =
+type AgentSettledHookConfig =
   | { command: string; timeout?: number; status?: string; when?: undefined }
   | { command: string; timeout?: number; status?: string; when: "dirty"; paths: string[] };
 
@@ -24,7 +24,18 @@ export interface HooksConfig {
 export const DEFAULT_TIMEOUT_MS = 120_000;
 
 const validateConfig = (config: HooksConfig, path: string): string | null => {
-  const settled = config.agent_settled as { when?: string; paths?: string[] } | undefined;
+  if (typeof config !== "object") {
+    return `Invalid config in ${path}`;
+  }
+  if (config.tool_call && !config.tool_call.command) {
+    return `"tool_call" requires a "command" in ${path}`;
+  }
+  const settled = config.agent_settled as
+    | { command?: string; when?: string; paths?: string[] }
+    | undefined;
+  if (settled && !settled.command) {
+    return `"agent_settled" requires a "command" in ${path}`;
+  }
   if (settled && settled.when !== undefined && settled.when !== "dirty") {
     return `Unsupported "when" value in ${path}: ${settled.when}`;
   }

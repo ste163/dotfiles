@@ -43,7 +43,7 @@ Example:
 | `timeout` | Time limit in milliseconds. Default: 120000.                                                  |
 
 A non-zero exit or a timeout blocks the tool call. The hook's stdout and
-stderr become the reason.
+stderr become the reason, truncated to 300 characters.
 
 ### agent_settled
 
@@ -55,9 +55,11 @@ stderr become the reason.
 | `status`  | Optional label. Shows a status widget below the editor (running, complete, failed).                                |
 | `timeout` | Time limit in milliseconds. Default: 120000.                                                                       |
 
-A failure shows a notification with the hook output. It does not block the
-session. With `"dirty"`, the flag clears after the hook runs, success or
-failure. If the hook never ran, the flag stays and the next settle retries.
+A failure shows a notification with the hook output, truncated to 300
+characters. It does not block the session. A settle that fires while the
+hook is still running is skipped. With `"dirty"`, the flag clears after
+the hook runs, success or failure. If the hook never ran, the flag stays
+and the next settle retries.
 
 ## Recipes
 
@@ -105,4 +107,3 @@ or to a root config file:
 
 The hook runs once per settle, after the edits. The status widget shows the
 result. A failure does not block the session.
-

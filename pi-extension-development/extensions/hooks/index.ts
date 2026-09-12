@@ -29,8 +29,6 @@ import { DEFAULT_TIMEOUT_MS, loadConfig, type HooksConfig } from "./config.ts";
 import { defaultDeps, type HooksDeps } from "./deps.ts";
 import { matchesAny, relativePath, shellQuote } from "./match.ts";
 
-export { defaultDeps, type HooksDeps };
-
 interface HooksState {
   dirty: boolean;
   running: boolean;
@@ -182,7 +180,7 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       deps,
     );
     if (result.killed || result.code !== 0) {
-      return { block: true, reason: outputOf(result) || "Blocked by hook" };
+      return { block: true, reason: tail(outputOf(result)) || "Blocked by hook" };
     }
     return;
   });
