@@ -101,10 +101,10 @@ export const isSafeCommand = (command: string): boolean => {
   return !isDestructive && isSafe;
 };
 
-// Default name offered when the user doesn't provide one for the plan file.
 export const DEFAULT_PLAN_FILE_NAME = "plan.md";
 
-// Strip any directory parts the user typed - plan file always lives in cwd.
+// The plan file always lives in the session cwd, so directory parts a user
+// types are discarded rather than honored.
 export const toBaseName = (path: string): string => path.split(/[/\\]/).pop() ?? path;
 
 export const withMdExt = (name: string): string => (/\.[^./\\]+$/.test(name) ? name : `${name}.md`);
@@ -129,9 +129,7 @@ const truncate = (text: string, max: number): string =>
 
 export const cleanStepText = (text: string): string => {
   const stripped = stripLeadingVerb(
-    text
-      .replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1") // Remove bold/italic
-      .replace(/`([^`]+)`/g, "$1"), // Remove code
+    text.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1").replace(/`([^`]+)`/g, "$1"),
   )
     .replace(/\s+/g, " ")
     .trim();
@@ -162,11 +160,16 @@ export const extractTodoItems = (message: string): TodoItem[] => {
 };
 
 export const extractDoneSteps = (message: string): number[] =>
-  Array.from(message.matchAll(/\[DONE:(\d+)\]/gi), (match) => Number(match[1])).filter((step) =>
-    Number.isFinite(step),
-  );
+  Array.from(message.matchAll(/\[DONE:(\d+)\]/gi)).flatMap((match) => {
+    const step = Number(match[1]);
+    return Number.isFinite(step) ? [step] : [];
+  });
 
-/** Marks matching steps and returns the new list plus how many changed. */
+/**
+ * Pure: returns a new list, never mutates the input. The count is how many
+ * steps changed, not how many markers matched, so callers only refresh the
+ * UI when something actually flipped.
+ */
 export const markCompletedSteps = (
   text: string,
   items: TodoItem[],
