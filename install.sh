@@ -72,7 +72,9 @@ done
 
 # pi-lens reads its machine-global config from ~/.pi-lens/config.json, not
 # from ~/.pi/agent/, so this one item links to a different destination.
-link_entry "$PI_SRC/pi-lens.json" "$HOME/.pi-lens/config.json" "file"
+# The source lives at .pi-lens/config.json (a directory, not the project
+# config file .pi-lens.json) so pi-lens never mistakes it for a project config.
+link_entry "$DOTFILES/.pi-lens/config.json" "$HOME/.pi-lens/config.json" "file"
 
 # --- Dev extensions (pi-extension-development/extensions/* -> .pi/extensions/*) ---
 # Our hand-written extensions live in pi-extension-development/ (its own TS project
@@ -141,7 +143,7 @@ for entry in "${PI_ITEMS[@]}"; do
   check_link "$PI_DST/$item" "$PI_SRC/$item"
 done
 
-check_link "$HOME/.pi-lens/config.json" "$PI_SRC/pi-lens.json"
+check_link "$HOME/.pi-lens/config.json" "$DOTFILES/.pi-lens/config.json"
 
 if [ -d "$DEV_EXTENSIONS_SRC" ]; then
   for dev_ext in "$DEV_EXTENSIONS_SRC"/*/; do
