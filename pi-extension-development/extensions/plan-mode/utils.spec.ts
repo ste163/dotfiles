@@ -76,11 +76,10 @@ test("cleanStepText", async (t) => {
     assert.equal(cleanStepText(""), "");
   });
 
-  await t.test("truncates long text with ellipsis", () => {
-    const long = "x".repeat(80);
-    const result = cleanStepText(long);
-    assert.equal(result.length, 50);
-    assert.ok(result.endsWith("..."));
+  await t.test("keeps long step text in full", () => {
+    const long = `A ${"word ".repeat(30)}step`;
+    assert.equal(cleanStepText(long), long);
+    assert.ok(long.length > 50);
   });
 });
 

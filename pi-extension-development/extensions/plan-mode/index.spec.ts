@@ -1275,7 +1275,7 @@ test("injects nothing while off or executing with an empty todo list", async () 
 
 // --- Context filtering ---
 
-test("filters plan-mode context messages out of history while off", async () => {
+test("drops every plan-mode message out of context while off", async () => {
   const { pi } = createExtension();
   const { ctx } = createFakeCtx();
 
@@ -1287,7 +1287,11 @@ test("filters plan-mode context messages out of history while off", async () => 
         { customType: "plan-mode-overview-context", role: "user", content: "marker" },
         { customType: "plan-mode-file-context", role: "user", content: "marker" },
         { customType: "plan-mode-execution-context", role: "user", content: "marker" },
-        { customType: "plan-mode-todo-list", role: "user", content: "keep me" },
+        { customType: "plan-mode-todo-list", role: "user", content: "marker" },
+        { customType: "plan-mode-execute", role: "user", content: "marker" },
+        { customType: "plan-mode-complete", role: "user", content: "marker" },
+        { customType: "plan-mode-write-file", role: "user", content: "marker" },
+        { customType: "plan-mode-plan-format", role: "user", content: "marker" },
         assistantMessage([textBlock("keep assistant")]),
         userMessage("text with [PLAN MODE ACTIVE] marker"),
         userMessage([textBlock("keeps [PLAN MODE ACTIVE]")]),
@@ -1301,7 +1305,6 @@ test("filters plan-mode context messages out of history while off", async () => 
 
   const kept = (result as { messages: unknown[] }).messages;
   assert.deepEqual(kept, [
-    { customType: "plan-mode-todo-list", role: "user", content: "keep me" },
     assistantMessage([textBlock("keep assistant")]),
     userMessage([textBlock("clean array"), { type: "text" }]),
     userMessage("clean string"),
@@ -1309,12 +1312,179 @@ test("filters plan-mode context messages out of history while off", async () => 
   ]);
 });
 
-test("does not filter context while a phase is active", async () => {
+test("keeps only the newest steering copy while a phase is active", async () => {
   const { pi } = createExtension();
   const { ctx } = createFakeCtx();
   await pi.commands["plan"]?.handler(undefined, ctx);
 
-  assert.equal(await callHandler(pi, "context", { messages: [] }, ctx), undefined);
+  const result = await callHandler(
+    pi,
+    "context",
+    {
+      messages: [
+        { customType: "plan-mode-overview-context", role: "user", content: "old steering" },
+        { customType: "plan-mode-todo-list", role: "user", content: "dropped artifact" },
+        { customType: "other-extension", role: "user", content: "kept custom" },
+        assistantMessage([textBlock("keep assistant")]),
+        { customType: "plan-mode-overview-context", role: "user", content: "new steering" },
+        { customType: "plan-mode-plan-format", role: "user", content: "old correction" },
+        { customType: "plan-mode-plan-format", role: "user", content: "new correction" },
+        userMessage("kept [PLAN MODE ACTIVE] while active"),
+      ],
+    },
+    ctx,
+  );
+
+  const kept = (result as { messages: unknown[] }).messages;
+  assert.deepEqual(kept, [
+    { customType: "other-extension", role: "user", content: "kept custom" },
+    assistantMessage([textBlock("keep assistant")]),
+    { customType: "plan-mode-overview-context", role: "user", content: "new steering" },
+    { customType: "plan-mode-plan-format", role: "user", content: "new correction" },
+    userMessage("kept [PLAN MODE ACTIVE] while active"),
+  ]);
+});
+
+// --- message_update streaming marking ---
+
+test("marks DONE steps live during streaming and refreshes the widget", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [
+        { step: 1, text: "a", completed: false },
+        { step: 2, text: "b", completed: false },
+      ],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx, widgetUpdates, statusWidget } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+  const entryCount = pi.entries.length;
+
+  await callHandler(
+    pi,
+    "message_update",
+    { message: assistantMessage([textBlock("[DONE:1]")]) },
+    ctx,
+  );
+
+  assert.deepEqual(widgetUpdates.at(-1), ["[x] a", "[ ] b"]);
+  assert.deepEqual(statusWidget.component?.render(), [" plan  executing 1/2"]);
+  assert.equal(pi.entries.length, entryCount);
+});
+
+test("ignores streamed updates with no new tags", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [{ step: 1, text: "a", completed: false }],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx, widgetUpdates } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+  const widgetUpdatesAfterStart = widgetUpdates.length;
+
+  await callHandler(
+    pi,
+    "message_update",
+    { message: assistantMessage([textBlock("no tags yet")]) },
+    ctx,
+  );
+
+  assert.equal(widgetUpdates.length, widgetUpdatesAfterStart);
+  assert.deepEqual(lastEntryData(pi).todos, [{ step: 1, text: "a", completed: false }]);
+});
+
+test("ignores message_update outside the executing phase", async () => {
+  const { pi } = createExtension();
+  const { ctx } = createFakeCtx();
+
+  assert.equal(
+    await callHandler(
+      pi,
+      "message_update",
+      { message: assistantMessage([textBlock("[DONE:1]")]) },
+      ctx,
+    ),
+    undefined,
+  );
+
+  await pi.commands["plan"]?.handler(undefined, ctx);
+  assert.equal(
+    await callHandler(
+      pi,
+      "message_update",
+      { message: assistantMessage([textBlock("[DONE:1]")]) },
+      ctx,
+    ),
+    undefined,
+  );
+});
+
+test("ignores message_update while executing with no todos", async () => {
+  const { pi } = createExtension();
+  const entries = [customEntry("plan-mode", { phase: "executing", todos: [], planFileName: null })];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  assert.equal(
+    await callHandler(
+      pi,
+      "message_update",
+      { message: assistantMessage([textBlock("[DONE:1]")]) },
+      ctx,
+    ),
+    undefined,
+  );
+});
+
+test("ignores non-assistant message_update events", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [{ step: 1, text: "a", completed: false }],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(pi, "message_update", { message: userMessage("[DONE:1]") }, ctx);
+
+  assert.deepEqual(lastEntryData(pi).todos, [{ step: 1, text: "a", completed: false }]);
+});
+
+test("turn_end still persists after streaming already marked the step", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [{ step: 1, text: "a", completed: false }],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx, widgetUpdates } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(
+    pi,
+    "message_update",
+    { message: assistantMessage([textBlock("[DONE:1]")]) },
+    ctx,
+  );
+  const widgetUpdatesAfterStream = widgetUpdates.length;
+  const entriesBeforeTurnEnd = pi.entries.length;
+
+  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("[DONE:1]")]) }, ctx);
+
+  assert.equal(widgetUpdates.length, widgetUpdatesAfterStream);
+  assert.equal(pi.entries.length, entriesBeforeTurnEnd + 1);
+  assert.deepEqual(lastEntryData(pi).todos, [{ step: 1, text: "a", completed: true }]);
 });
 
 // --- turn_end progress ---

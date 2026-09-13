@@ -60,6 +60,16 @@ When all steps complete, the extension sends an automatic completion
 notice. The plan is done. The agent does not respond to that notice; it
 waits for the user's next message.
 
+Plan-mode messages never linger in the model's context: display and
+trigger artifacts are dropped, and only the newest steering copy stays
+while plan mode is active. The transcript keeps every message. The
+model's knowledge that the plan is complete comes from its own closing
+response, not from plan-mode messages.
+
+Step marks appear live: plan-mode watches the assistant stream and flips
+a todo the moment its `[DONE:n]` tag completes, refreshing the widget.
+The turn-end pass persists and stays as the backstop.
+
 ## Paths
 
 ```mermaid
@@ -91,6 +101,7 @@ Plan:
   `## Plan`, or `**Plan:**`.
 - Steps are lines that start with a number and a period or a closing
   paren. Markdown inside a step is stripped.
+- Step text is kept in full. Long steps wrap in the display.
 - When the last response has no parseable plan, the agent gets one
   corrective turn that restates the format and the exact problem. The
   execute option stays hidden until a plan parses.

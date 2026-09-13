@@ -129,18 +129,12 @@ const stripLeadingVerb = (text: string): string =>
 const capitalize = (text: string): string =>
   text.length > 0 ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 
-const truncate = (text: string, max: number): string =>
-  text.length > max ? `${text.slice(0, max - 3)}...` : text;
-
-export const cleanStepText = (text: string): string => {
-  const stripped = stripLeadingVerb(
-    text.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1").replace(/`([^`]+)`/g, "$1"),
-  )
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return truncate(capitalize(stripped), 50);
-};
+export const cleanStepText = (text: string): string =>
+  capitalize(
+    stripLeadingVerb(text.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1").replace(/`([^`]+)`/g, "$1"))
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 
 const isPlanStepCandidate = (text: string): boolean =>
   text.length > 5 && !text.startsWith("`") && !text.startsWith("/") && !text.startsWith("-");

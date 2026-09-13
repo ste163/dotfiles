@@ -50,11 +50,24 @@ type Phase = "off" | "overview" | "plan-file" | "executing";
 
 const WRITE_TOOL_NAMES: readonly string[] = ["write", "edit"];
 
-/** Context messages injected per phase; filtered out of history while off. */
-const CONTEXT_TYPES: readonly string[] = [
+/** Display and trigger artifacts; they never enter the model's context. */
+const DROPPED_TYPES: readonly string[] = [
+  "plan-mode-todo-list",
+  "plan-mode-execute",
+  "plan-mode-complete",
+];
+
+/**
+ * Steering messages. Only the newest copy of each enters the model's
+ * context, and only while plan mode is active. When plan mode is off,
+ * none of them do. The transcript keeps every message regardless.
+ */
+const STEERING_TYPES: readonly string[] = [
   "plan-mode-overview-context",
   "plan-mode-file-context",
   "plan-mode-execution-context",
+  "plan-mode-plan-format",
+  "plan-mode-write-file",
 ];
 
 interface PlanModeState {
@@ -320,13 +333,30 @@ export const createPlanModeExtension = (
   });
 
   pi.on("context", (event) => {
-    if (state.phase !== "off") return;
+    const lastSteeringIndex = new Map<string, number>();
+    event.messages.forEach((message, index) => {
+      const customType = (message as AgentMessage & { customType?: string }).customType;
+      if (customType !== undefined && STEERING_TYPES.includes(customType)) {
+        lastSteeringIndex.set(customType, index);
+      }
+    });
 
     return {
-      messages: event.messages.filter((m) => {
+      messages: event.messages.filter((m, index) => {
         const msg = m as AgentMessage & { customType?: string };
-        if (msg.customType !== undefined && CONTEXT_TYPES.includes(msg.customType)) return false;
-        if (msg.role !== "user") return true;
+        const customType = msg.customType;
+
+        if (customType !== undefined && DROPPED_TYPES.includes(customType)) {
+          // Display and trigger artifacts never enter the model's context.
+          return false;
+        }
+        if (customType !== undefined && STEERING_TYPES.includes(customType)) {
+          // Only the newest steering copy survives, and only while plan
+          // mode is active. Off drops every plan-mode message.
+          return state.phase !== "off" && lastSteeringIndex.get(customType) === index;
+        }
+
+        if (msg.role !== "user" || state.phase !== "off") return true;
 
         const content = msg.content;
         if (typeof content === "string") {
@@ -340,6 +370,17 @@ export const createPlanModeExtension = (
         return true;
       }),
     };
+  });
+
+  pi.on("message_update", (event, ctx) => {
+    if (state.phase !== "executing" || state.todos.length === 0) return;
+    if (!isAssistantMessage(event.message)) return;
+
+    const result = markCompletedSteps(getTextContent(event.message), state.todos);
+    if (result.completed > 0) {
+      state.todos = result.todos;
+      updateStatus(ctx);
+    }
   });
 
   pi.on("before_agent_start", () => {
