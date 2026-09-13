@@ -1,6 +1,6 @@
 {
   "permission": {
-    "*": "allow",
+    "*": "ask",
     "edit": "allow",
     "write": "allow",
     "mcp": "allow",
@@ -11,7 +11,7 @@
       "*.env.example": "allow"
     },
     "bash": {
-      "*": "allow",
+      "*": "ask",
       "rm -rf *": "deny",
       "sudo *": "ask"
     },
