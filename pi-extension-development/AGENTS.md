@@ -90,6 +90,13 @@ npm test             # node --test, includes the structure.spec.ts hard-rule che
 Do not consider a change to an extension complete until the hook reports a
 pass. A hook failure does not block the session, but you must fix it.
 
+## Hook verification is never a plan todo
+
+The hook runs on its own after edits and its result shows in the UI only.
+Only the user reports the hook result to the agent. Never put hook
+verification in a plan as a step. A hook failure the user reports is
+ordinary follow-up work, not a plan step.
+
 ## Testing approach — read before writing tests
 
 - **No real disk I/O, no `process.chdir`, no temp directories.** Anything in

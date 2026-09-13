@@ -39,7 +39,26 @@ session in overview.
    - `Execute plan` — skip the file; full access returns and the plan is
      executed with progress tracking.
 4. In the plan-file phase the same choice appears, plus `Refine the plan`.
-5. The agent marks each finished step with a `[DONE:n]` tag.
+5. The agent marks each finished step with exactly one `[DONE:n]` tag,
+   in the same turn that completes the step.
+
+## Step rules
+
+Injected into the context every turn while executing:
+
+- A step is complete only when its signal arrived in that turn: a tool
+  result, a command output, or a user message. Background events are not
+  signals.
+- Exactly one `[DONE:n]` tag per step, in the turn that completes it.
+  Never batch tags, never pre-claim, never tag in a later turn.
+
+Injected while overview is active:
+
+- Write one action per step. Split steps that end at different times.
+
+When all steps complete, the extension sends an automatic completion
+notice. The plan is done. The agent does not respond to that notice; it
+waits for the user's next message.
 
 ## Paths
 

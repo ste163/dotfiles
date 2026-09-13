@@ -15,6 +15,7 @@ Do this:
 - Ask clarifying questions about the task before proposing a plan.
 - Study the code as much as you need with read-only tools and commands.
 - Present options and tradeoffs when the approach is not obvious.
+- Write one action per step. Split steps that end at different times.
 - End with a numbered plan under a "Plan:" header, as the final section of your response. Put nothing after the numbered steps.
 
 Do NOT write or edit any file. Do NOT attempt any change. Wait for the user to continue planning, write the plan to a file, or execute it.`,
@@ -38,7 +39,11 @@ Remaining steps:
 ${todos.flatMap((t) => (t.completed ? [] : [`${t.step}. ${t.text}`])).join("\n")}
 
 Execute each step in order.
-After completing a step, include a [DONE:n] tag in your response.`,
+
+Step rules:
+- A step is complete only when its signal arrived in this turn: a tool result, a command output, or a user message. Background events are not signals.
+- Mark exactly one [DONE:n] tag per step, in the same turn that completes it.
+- Never batch tags, never pre-claim a step, never tag in a later turn.`,
   display: false,
 });
 
@@ -106,6 +111,6 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 export const completeMessage = (todos: TodoItem[]): CustomMessage => ({
   customType: "plan-mode-complete",
-  content: `**Plan Complete!**\n\n${todos.map((t) => `~~${t.text}~~`).join("\n")}`,
+  content: `**Plan Complete!**\n\n${todos.map((t) => `~~${t.text}~~`).join("\n")}\n\nThis notice is automatic. The plan is done. Do not respond to it; wait for the user's next message.`,
   display: true,
 });
