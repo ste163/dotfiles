@@ -12,8 +12,9 @@
  *   matching one of the configured `paths` patterns, and keeps re-running
  *   on each settle while the last run failed - so a failure fixed through
  *   bash (which never marks dirty) still gets re-verified. A failure is
- *   injected into the session on the first failure and again after new
- *   edits; the failed status stays visible until a run passes.
+ *   injected into the session on the first failure, again after new edits,
+ *   and again when the failure message changes; the failed status stays
+ *   visible until a run passes.
  *
  * The config loads lazily on the first event, resolved against the session
  * cwd — never `process.cwd()`, which can diverge from it. The policy lives
@@ -37,6 +38,7 @@ interface HooksState {
   dirty: boolean;
   running: boolean;
   failed: boolean;
+  lastFailure: string | null;
   status: HookStatus | null;
   widget: { invalidate(): void } | null;
 }
@@ -58,6 +60,7 @@ const createState = (): HooksState => ({
   dirty: false,
   running: false,
   failed: false,
+  lastFailure: null,
   status: null,
   widget: null,
 });
@@ -224,16 +227,19 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       if (failedRun) {
         const failure = describeFailure(result);
         ctx.ui.notify(failure, "error");
-        // Steer the agent on the first failure, and again when it edited
-        // files and still failed. A repeated failure with no new changes
-        // only refreshes the status, so the loop cannot run forever.
-        if (!wasFailed || dirtyRun) {
+        // Steer the agent on the first failure, when it edited files and
+        // still failed, and when the failure message changed - new output
+        // is new information. A repeated identical failure with no new
+        // changes only refreshes the status, so the loop cannot run forever.
+        if (!wasFailed || dirtyRun || failure !== state.lastFailure) {
           pi.sendMessage(
             { customType: "hooks-failure", content: failure, display: true },
             { deliverAs: "steer", triggerTurn: true },
           );
         }
+        state.lastFailure = failure;
       } else {
+        state.lastFailure = null;
         const output = tail(outputOf(result));
         ctx.ui.notify(output === "" ? "Hook passed" : output, "info");
       }
@@ -245,12 +251,13 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       if (label) updateStatus(state, { label, kind: "failed" });
       const failure = describeError(error);
       ctx.ui.notify(failure, "error");
-      if (!wasFailed) {
+      if (!wasFailed || failure !== state.lastFailure) {
         pi.sendMessage(
           { customType: "hooks-failure", content: failure, display: true },
           { deliverAs: "steer", triggerTurn: true },
         );
       }
+      state.lastFailure = failure;
     } finally {
       state.running = false;
     }

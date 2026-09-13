@@ -62,11 +62,14 @@ into the session, so the agent sees the output and starts a turn to fix
 it. The failed status stays visible until a later run passes. While the
 last run failed, every settle re-runs the hook - even without new edits,
 so a failure fixed through bash still gets re-verified. The failure
-message is injected once, and again only when the agent edits files and
-the hook still fails. A settle that fires while the hook is still running
-is skipped. With `"dirty"`, the flag clears after the hook runs, success
-or failure. If the hook never ran, the failure still carries the retry
-obligation and the next settle re-runs.
+message is injected on the first failure, again when the agent edits
+files and the hook still fails, and again when the failure message
+changes - a new error is new information. A repeated identical failure
+with no new changes only refreshes the status, so the loop cannot run
+forever. A settle that fires while the hook is still running is skipped.
+With `"dirty"`, the flag clears after the hook runs, success or failure.
+If the hook never ran, the failure still carries the retry obligation
+and the next settle re-runs.
 
 ## Recipes
 

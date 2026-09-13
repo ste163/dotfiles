@@ -461,8 +461,9 @@ export const createPlanModeExtension = (
     }
 
     // A resumed session (or one started with the flag) keeps its phase in
-    // the entry log, so the next session restores the same phase.
-    if (state.phase !== "off" && !persisted) {
+    // the entry log, so the next session restores the same phase. Resumed
+    // sessions also persist a cancellation, so the log reflects the decision.
+    if (!persisted && (isResume || state.phase !== "off")) {
       persistState();
     }
 

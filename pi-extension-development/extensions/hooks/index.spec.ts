@@ -486,6 +486,27 @@ test("stringifies the reason when the hook rejects with a non-Error", async () =
   assert.equal(notifications[0]?.message, "Hook error: spawn failed");
 });
 
+test("steers on a changed error message after repeated hook rejections", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG);
+  deps.exec = async (command, args, options) => {
+    deps.execCalls.push({ command, args, options });
+    if (deps.execCalls.length < 3) throw new Error("spawn failed");
+    throw new Error("different error");
+  };
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  assert.equal(pi.sentMessages[0]?.message.content, "Hook error: spawn failed");
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 2);
+  assert.equal(pi.sentMessages[1]?.message.content, "Hook error: different error");
+});
+
 const mountWidget = (widgets: WidgetMount[], tui: FakeTui): WidgetComponent => {
   const mount = widgets[0];
   assert.ok(mount, "expected a widget mount");
@@ -666,6 +687,39 @@ test("a repeated failure with no new edits does not inject another message", asy
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.equal(deps.execCalls.length, 2);
   assert.equal(pi.sentMessages.length, 1);
+});
+
+test("injects the failure again when the failure message changes", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [
+    failed("format:check failed"),
+    failed("npm test failed"),
+  ]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /format:check failed/);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(deps.execCalls.length, 2);
+  assert.equal(pi.sentMessages.length, 2);
+  assert.match(pi.sentMessages[1]?.message.content ?? "", /npm test failed/);
+});
+
+test("steers again after a pass when the same failure returns on new edits", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed("boom"), ok("passed"), failed("boom")]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 2);
 });
 
 test("injects the failure again when the agent edits files and still fails", async () => {
