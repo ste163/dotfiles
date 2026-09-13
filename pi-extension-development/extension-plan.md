@@ -2,11 +2,12 @@
 
 ## Purpose
 
-Build the `file-path-rules` extension in the pi-extension-development repo.
-The extension reads rules from each project's `.pi/rules/*.md` files. Each
-rule maps glob patterns to a doc. When the model touches a matching path
-with read, edit, or write, the extension appends the doc as a reminder into
-the tool result content. The model sees the rule right after the touch.
+Build the `file-path-rules` extension in the pi-extension-development repo,
+and land the review fixes for it. The extension reads rules from each
+project's `.pi/rules/*.md` files. Each rule maps glob patterns to a doc.
+When the model touches a matching path with read, edit, or write, the
+extension appends the doc as a reminder into the tool result content. The
+model sees the rule right after the touch.
 
 The plan also covers two supporting changes:
 
@@ -30,14 +31,22 @@ is config-only work in another repo and stays separate.
 - Glob engine: hand-rolled, no runtime dependencies. Vocabulary: double
   star as a whole segment (zero or more directories), star (no slash),
   question mark (one char), and brace alternation `{a,b}`. Dot directories
-  work because segments match literally.
-- Firing: read, edit, and write tools only. The match uses
-  `event.input.path`. The reminder fires once per file per session. Dedupe
-  uses the normalized absolute path.
-- Mark and append split: mark fired on `tool_call` (preflight is
-  sequential), append on `tool_result` keyed by `toolCallId`. A call that
-  is blocked later consumes its reminder without appending it. This trade
-  is accepted: exactly-once wins.
+  work because segments match literally. A pattern that is exactly `**` or
+  `**/` matches everything, a bare file included. Multi-segment globstar
+  patterns keep their segment behavior, so `**/**` does not match a bare
+  file - accepted boundary.
+- Firing: read, edit, and write tools only. The pattern match uses the
+  project-relative form of `event.input.path`.
+- Dedupe: once per file per session. The key is the fully normalized
+  absolute path (the tool input resolved against `ctx.cwd`), so every
+  spelling of one file (`./a.ts`, `a//b.ts`, `a/../b.ts`, the absolute
+  form) fires once.
+- Mark and append split: `tool_call` marks the path fired and stores the
+  project-relative matched path plus the matched rules per `toolCallId`
+  (preflight is sequential, so parallel calls on one file cannot
+  double-fire). `tool_result` appends the reminders from the stored entry.
+  A call that is blocked later consumes its reminder without appending it.
+  This trade is accepted: exactly-once wins.
 - Reminder block format: one text block per matched rule. Header line:
   `[file-path-rules] rule: .pi/rules/<name> — matched: <path>`. Then the
   doc body.
@@ -58,77 +67,50 @@ is config-only work in another repo and stays separate.
 - 100% line, branch, and function coverage.
 - Black-box tests: fake pi and fake ctx, in-memory fakes.
 
-## Plan:
+## Implemented
 
-1. Harden plan-mode plan parsing and validation.
-   - utils.ts: replace the header regex with a lenient per-line pattern.
-     It accepts `Plan:`, `Plan`, and markdown heading or bold forms.
-     Capture full numbered step lines and strip markdown inside
-     `cleanStepText`. Add `planFormatIssue(message)`. It returns the exact
-     problem (missing header, no numbered steps, steps filtered out) or
-     null when a plan parses.
-   - index.ts: at `agent_end`, when extraction finds nothing, send one
-     corrective follow-up turn (`formatCorrectionMessage` with the issue)
-     and skip the next-action prompt. A `formatWarned` state flag, cleared
-     when a valid plan extracts, limits this to one corrective turn per
-     failure streak. A repeat failure only notifies and shows the prompt.
-     Offer the Execute plan option only when todos exist.
-   - messages.ts: add `formatCorrectionMessage(issue)`.
-   - Update utils.spec.ts and index.spec.ts. Update README.md with the
-     required plan format.
+The PR delivered the base extension (`match.ts`, `config.ts`, `deps.ts`,
+`index.ts` with colocated specs), the plan-mode parsing hardening
+(`utils.ts`, `messages.ts`, `index.ts`), and the hooks trust gating with
+specs. The remaining work below is the review-fix iteration.
 
-2. Create `extensions/file-path-rules/` with deps.ts, match.ts,
-   config.ts, index.ts, README.md, and colocated specs.
+## Remaining work
 
-3. Write the glob matcher (match.ts). `relativePath` strips `./` and the
-   cwd prefix. `globToRegExp` converts one pattern to an anchored regex:
-   split on `/`; a whole double-star segment becomes zero-or-more
-   directories; star and question mark become non-slash chars; `{a,b}`
-   becomes alternation; other chars are escaped. `matchesAny(path,
-patterns)` tests all patterns.
+1. Fix `globToRegExp` in `extensions/file-path-rules/match.ts`. A
+   standalone `**` or `**/` pattern compiles to `^.*$` and matches a bare
+   file. Multi-segment globstar behavior stays unchanged. While editing,
+   remove the `let previousGlobstar` flag - the slash-skip rule derives
+   from `index === 1 && segments[0] === "**"`. Add match.spec.ts cases for
+   bare `**`, bare `**/`, and a file at depth against `**`.
+2. Store the matched path in the pending entry at `tool_call` time in
+   `extensions/file-path-rules/index.ts`. The entry holds the
+   project-relative display path plus the matched rules. `tool_result`
+   reads the path from the entry instead of `event.input.path`. Delete the
+   empty-string fallback and the duplicate normalization. Update
+   index.spec.ts: replace the empty-match test with one that asserts the
+   stored path appears when the result input has none.
+3. Change the dedupe key in `extensions/file-path-rules/index.ts` to a
+   fully normalized absolute path. Resolve the tool input against
+   `ctx.cwd` for the fired check and key; keep the relative form for
+   pattern matching. Update index.spec.ts with dedupe tests for `./`,
+   duplicate-separator, `..`, and absolute spellings of one file.
+4. Rewrite `findMatchingBrace` in `extensions/file-path-rules/match.ts`
+   with recursion. Remove the `let` counters and the for loop.
+5. Refactor `session_start` in `extensions/plan-mode/index.ts` to remove
+   `let persisted`. Use else-paths: each branch that persists calls
+   `persistState()` itself, and the fallback runs only when no branch did.
+   Keep the same persistence behavior, including persisting a naming
+   cancellation on resume.
+6. Add one trust-gating line to `extensions/hooks/README.md`: hooks run
+   only for trusted projects, and trust granted mid-session activates
+   hooks on the next event.
 
-4. Write rule loading (config.ts). `loadRules(deps, cwd)` lists
-   `<cwd>/.pi/rules/*.md` via `CONFIG_DIR_NAME`, sorted for determinism.
-   Parse each file with `parseFrontmatter` from
-   `@earendil-works/pi-coding-agent`. Skip files without `paths:` silently.
-   Validate `paths` as a string or a non-empty list of non-empty strings.
-   Return `{ rules, errors }`. Each error names the file and the problem.
-   Rule shape: `{ file, patterns, body }`.
+## Verification
 
-5. Wire index.ts. deps.ts exposes `readFile` and `readdir` (null on
-   missing or unreadable). `session_start` loads rules when
-   `ctx.isProjectTrusted()` is true. An untrusted project loads nothing
-   and the extension stays inert. Reason `reload` re-loads rules and
-   clears fired/pending state. Config errors are notified once.
-
-6. Tool events. `tool_call`: for read, edit, and write, normalize
-   `input.path` to an absolute path. Find all rules whose patterns match.
-   When any match and the path is not yet fired: mark fired and store the
-   matched rules in `pending[toolCallId]`. `tool_result`: when
-   `pending[toolCallId]` exists, append one text block per rule and clear
-   the pending entry. Non-path tools and untrusted projects do nothing.
-
-7. Write tests. match.spec.ts covers every glob form, braces, dot
-   directories, no cross-segment star, and relative path normalization.
-   config.spec.ts covers a missing dir, files without `paths`, string and
-   list paths, invalid YAML, invalid paths values, body stripping, and
-   sort order. index.spec.ts covers fire-once-per-file, multiple rules on
-   one path, parallel same-file calls, non-path tools, untrusted project
-   inertness, reload reset, and error notification. Failure cases first,
-   success after.
-
-8. Add trust gating to hooks. In `session_start`, `tool_call`, and
-   `agent_settled`, return early when `!ctx.isProjectTrusted()` before
-   `ensureConfig` and before running hooks. Per-event checks mean trust
-   granted mid-session activates hooks on the next event. Update
-   index.spec.ts with the new fake ctx method and untrusted-then-trusted
-   tests.
-
-9. Verify. The repo hook runs typecheck, lint, format:check
-   (auto-formatting on failure), and tests on settle. Fix every failure
-   until the hook reports a pass. All touched files need 100% coverage.
-
-10. Symlink and live-verify. Create `~/.pi/agent/extensions/file-path-rules`
-    pointing at the new directory. In a scratch project with sample
-    `.pi/rules/*.md` files, touch a matching path and confirm the reminder
-    appears in the tool result, once per file.
+- The repo hook runs typecheck, lint, format:check (auto-formatting on
+  failure), and tests on settle. Fix every failure until the hook reports
+  a pass. All touched files keep 100% coverage.
+- Live-verify in a scratch project: create
+  `~/.pi/agent/extensions/file-path-rules` pointing at the new directory,
+  add a `paths: "**"` rule as the regression case for fix 1, touch a bare
+  file and a nested file, and confirm the reminder appears once per file.

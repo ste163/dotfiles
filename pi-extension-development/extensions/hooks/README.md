@@ -16,6 +16,8 @@ model of the Copilot CLI and Claude Code.
 5. A user abort is a hard stop. When the agent settles because the user
    pressed Escape, no settled hook runs and nothing re-engages the agent.
 6. A bad config disables the hooks and shows a warning at session start.
+7. Hooks run only for trusted projects. Trust granted mid-session
+   activates hooks on the next event.
 
 ## Config
 

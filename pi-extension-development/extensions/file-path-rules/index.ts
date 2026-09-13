@@ -24,16 +24,23 @@ import {
   type ToolCallEvent,
   type WriteToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
+import { resolve } from "node:path";
 import { loadRules, RULES_DIR_NAME, type Rule } from "./config.ts";
 import { defaultDeps, type FilePathRulesDeps } from "./deps.ts";
 import { matchesAny, relativePath } from "./match.ts";
 
+interface PendingReminder {
+  /** Project-relative form shown in the reminder header. */
+  path: string;
+  rules: readonly Rule[];
+}
+
 interface FilePathRulesState {
   rules: readonly Rule[];
-  /** Normalized paths that already got their reminder this session. */
+  /** Fully normalized absolute paths that already got their reminder this session. */
   fired: readonly string[];
-  /** Matched rules keyed by toolCallId, between tool_call and tool_result. */
-  pending: Record<string, readonly Rule[]>;
+  /** Reminders keyed by toolCallId, between tool_call and tool_result. */
+  pending: Record<string, PendingReminder>;
 }
 
 const createState = (): FilePathRulesState => ({
@@ -48,11 +55,6 @@ const isPathToolCallEvent = (event: ToolCallEvent): event is PathToolCallEvent =
   isToolCallEventType("read", event) ||
   isToolCallEventType("edit", event) ||
   isToolCallEventType("write", event);
-
-const inputPath = (input: unknown): string | null => {
-  const candidate = (input as { path?: unknown }).path;
-  return typeof candidate === "string" ? candidate : null;
-};
 
 const reminderBlock = (rule: Rule, matchedPath: string): TextContent => ({
   type: "text",
@@ -80,25 +82,27 @@ export const createFilePathRulesExtension = (
     if (!ctx.isProjectTrusted()) return;
     if (!isPathToolCallEvent(event)) return;
 
-    const normalized = relativePath(event.input.path, ctx.cwd);
-    if (state.fired.includes(normalized)) return;
+    // The absolute key collapses every spelling of one file (./, //, ..),
+    // so the dedupe is per file, not per spelling. Pattern matching keeps
+    // the project-relative form rules are written against.
+    const firedKey = resolve(ctx.cwd, event.input.path);
+    if (state.fired.includes(firedKey)) return;
 
+    const normalized = relativePath(event.input.path, ctx.cwd);
     const matched = state.rules.filter((rule) => matchesAny(normalized, rule.patterns));
     if (matched.length === 0) return;
 
-    state.fired = [...state.fired, normalized];
-    state.pending[event.toolCallId] = matched;
+    state.fired = [...state.fired, firedKey];
+    state.pending[event.toolCallId] = { path: normalized, rules: matched };
   });
 
-  pi.on("tool_result", (event, ctx) => {
+  pi.on("tool_result", (event) => {
     // Pending entries only fill through the gated tool_call, so a result
     // event alone can never fire a reminder.
-    const matched = state.pending[event.toolCallId];
-    if (!matched) return;
+    const pending = state.pending[event.toolCallId];
+    if (!pending) return;
 
-    const path = inputPath(event.input);
-    const normalized = path === null ? "" : relativePath(path, ctx.cwd);
-    const blocks = matched.map((rule) => reminderBlock(rule, normalized));
+    const blocks = pending.rules.map((rule) => reminderBlock(rule, pending.path));
 
     state.pending = Object.fromEntries(
       Object.entries(state.pending).filter(([id]) => id !== event.toolCallId),

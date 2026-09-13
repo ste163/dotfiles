@@ -279,6 +279,55 @@ test("a second touch of the same file stays silent", async () => {
   assert.equal(second, undefined);
 });
 
+test("every spelling of one file dedupes: ./, duplicate separators, .., absolute", async () => {
+  const { pi, ctx } = createExtension();
+  await startSession(pi, ctx);
+
+  await callHandler(pi, "tool_call", toolCallEvent("edit", "c1", "src/pages/a.ts"), ctx);
+  await callHandler(
+    pi,
+    "tool_result",
+    toolResultEvent("edit", "c1", { path: "src/pages/a.ts" }),
+    ctx,
+  );
+
+  await callHandler(pi, "tool_call", toolCallEvent("edit", "c2", "./src/pages/a.ts"), ctx);
+  const dotSlash = await callHandler(
+    pi,
+    "tool_result",
+    toolResultEvent("edit", "c2", { path: "./src/pages/a.ts" }),
+    ctx,
+  );
+  assert.equal(dotSlash, undefined);
+
+  await callHandler(pi, "tool_call", toolCallEvent("edit", "c3", "src//pages//a.ts"), ctx);
+  const doubleSlash = await callHandler(
+    pi,
+    "tool_result",
+    toolResultEvent("edit", "c3", { path: "src//pages//a.ts" }),
+    ctx,
+  );
+  assert.equal(doubleSlash, undefined);
+
+  await callHandler(pi, "tool_call", toolCallEvent("edit", "c4", "src/pages/../pages/a.ts"), ctx);
+  const dotDot = await callHandler(
+    pi,
+    "tool_result",
+    toolResultEvent("edit", "c4", { path: "src/pages/../pages/a.ts" }),
+    ctx,
+  );
+  assert.equal(dotDot, undefined);
+
+  await callHandler(pi, "tool_call", toolCallEvent("edit", "c5", "/repo/src/pages/a.ts"), ctx);
+  const absolute = await callHandler(
+    pi,
+    "tool_result",
+    toolResultEvent("edit", "c5", { path: "/repo/src/pages/a.ts" }),
+    ctx,
+  );
+  assert.equal(absolute, undefined);
+});
+
 test("a different file under the same rule fires again", async () => {
   const { pi, ctx } = createExtension();
   await startSession(pi, ctx);
@@ -389,18 +438,13 @@ test("a reload re-reads the rules and resets the dedupe", async () => {
   assert.match(appendedTextOf(afterReload), /Load the app-domain skill\./);
 });
 
-test("a tool result without a path string still appends with an empty match", async () => {
+test("a result event without the original path still shows the matched path", async () => {
   const { pi, ctx } = createExtension();
   await startSession(pi, ctx);
 
   await callHandler(pi, "tool_call", toolCallEvent("edit", "c1", "src/pages/a.ts"), ctx);
-  const result = await callHandler(
-    pi,
-    "tool_result",
-    toolResultEvent("edit", "c1", { path: 42 }),
-    ctx,
-  );
-  assert.match(appendedTextOf(result), /matched: /);
+  const result = await callHandler(pi, "tool_result", toolResultEvent("edit", "c1", {}), ctx);
+  assert.match(appendedTextOf(result), /matched: src\/pages\/a\.ts/);
 });
 
 // --- default export ---

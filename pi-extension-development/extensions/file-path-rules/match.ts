@@ -25,16 +25,14 @@ export const relativePath = (path: string, cwd: string): string => {
  * fall back to literal matching.
  */
 const findMatchingBrace = (segment: string, open: number): number => {
-  let depth = 0;
-  for (let index = open; index < segment.length; index++) {
+  const scan = (index: number, depth: number): number => {
+    if (index >= segment.length) return -1;
     const char = segment.charAt(index);
-    if (char === "{") depth++;
-    if (char === "}") {
-      depth--;
-      if (depth === 0) return index;
-    }
-  }
-  return -1;
+    if (char === "{") return scan(index + 1, depth + 1);
+    if (char === "}") return depth === 1 ? index : scan(index + 1, depth - 1);
+    return scan(index + 1, depth);
+  };
+  return scan(open, 0);
 };
 
 /** One path segment to a regex piece, without the globstar case. */
@@ -70,33 +68,18 @@ const plainSegmentToRegex = (segment: string): string =>
  * can match zero directories without leaving a dangling separator.
  */
 export const globToRegExp = (pattern: string): RegExp => {
-  const segments = pattern.split("/");
-  const pieces: string[] = [];
-  let previousGlobstar = false;
+  // A lone globstar covers the whole path, a bare file name included.
+  if (pattern === "**" || pattern === "**/") return /^.*$/;
 
-  segments.forEach((segment, index) => {
-    if (segment === "**" && index === 0) {
-      pieces.push("(?:.*/)?");
-      previousGlobstar = true;
-      return;
-    }
-    if (segment === "**" && index === segments.length - 1) {
-      pieces.push("(?:/.*)?");
-      previousGlobstar = true;
-      return;
-    }
-    if (segment === "**") {
-      // Slash-prefixed, so zero directories still leave exactly one
-      // separator: the one the next segment contributes. A slash-suffixed
-      // form would demand a directory after the globstar and a dangling
-      // slash for files directly under the prefix.
-      pieces.push("(?:/[^/]+)*");
-      previousGlobstar = false;
-      return;
-    }
-    if (index > 0 && !previousGlobstar) pieces.push("/");
-    pieces.push(segmentToRegex(segment));
-    previousGlobstar = false;
+  const segments = pattern.split("/");
+  // Only the segment right after a leading globstar skips its own slash,
+  // because the globstar's optional directory part already ends in one.
+  const pieces = segments.flatMap((segment, index) => {
+    if (segment === "**" && index === 0) return ["(?:.*/)?"];
+    if (segment === "**" && index === segments.length - 1) return ["(?:/.*)?"];
+    if (segment === "**") return ["(?:/[^/]+)*"];
+    const slash = index > 0 && !(segments[0] === "**" && index === 1) ? "/" : "";
+    return [slash, segmentToRegex(segment)];
   });
 
   return new RegExp(`^${pieces.join("")}$`);

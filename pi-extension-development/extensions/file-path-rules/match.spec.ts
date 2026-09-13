@@ -79,6 +79,13 @@ test("matchesAny", async (t) => {
 });
 
 test("globToRegExp", async (t) => {
+  await t.test("a standalone globstar matches everything, a bare file included", () => {
+    assert.equal(globToRegExp("**").test("foo.txt"), true);
+    assert.equal(globToRegExp("**").test("src/a/b.ts"), true);
+    assert.equal(globToRegExp("**/").test("foo.txt"), true);
+    assert.equal(globToRegExp("**/").test("src/a/b.ts"), true);
+  });
+
   await t.test("escapes regex specials in literal segments", () => {
     assert.equal(globToRegExp("a+b").test("a+b"), true);
     assert.equal(globToRegExp("a+b").test("aab"), false);
@@ -90,6 +97,11 @@ test("globToRegExp", async (t) => {
   await t.test("keeps unbalanced braces literal", () => {
     assert.equal(globToRegExp("a{b").test("a{b"), true);
     assert.equal(globToRegExp("a{b").test("ab"), false);
+  });
+
+  await t.test("finds the closing brace of a nested group", () => {
+    assert.equal(globToRegExp("a{{b}}").test("ab"), true);
+    assert.equal(globToRegExp("a{{b}}").test("a{b"), false);
   });
 
   await t.test("anchors the whole pattern", () => {

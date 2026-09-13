@@ -522,7 +522,6 @@ export const createPlanModeExtension = (
     }
 
     const isResume = planEntry !== undefined;
-    let persisted = false;
 
     if (isResume && state.phase === "executing" && state.todos.length > 0) {
       // Scan only messages after the last execute marker, so [DONE:n] tags
@@ -543,31 +542,28 @@ export const createPlanModeExtension = (
       state.todos = markCompletedSteps(messages.map(getTextContent).join("\n"), state.todos).todos;
     }
 
-    if (
+    const planFileMissing =
       state.phase === "plan-file" &&
-      (state.planFileName === null || !planFileExists(state.planFileName, deps))
-    ) {
-      if (ctx.hasUI) {
-        const chosen = await promptForPlanFileName(ctx);
-        if (chosen !== null) {
-          state.planFileName = chosen;
-          persistState();
-          persisted = true;
-        } else {
-          state.phase = "off";
-        }
-      } else {
-        // Headless run: no UI to prompt, so fall back silently.
-        state.planFileName = DEFAULT_PLAN_FILE_NAME;
-        persistState();
-        persisted = true;
-      }
-    }
+      (state.planFileName === null || !planFileExists(state.planFileName, deps));
 
-    // A resumed session (or one started with the flag) keeps its phase in
-    // the entry log, so the next session restores the same phase. Resumed
-    // sessions also persist a cancellation, so the log reflects the decision.
-    if (!persisted && (isResume || state.phase !== "off")) {
+    if (planFileMissing && ctx.hasUI) {
+      const chosen = await promptForPlanFileName(ctx);
+      if (chosen !== null) {
+        state.planFileName = chosen;
+        persistState();
+      } else {
+        // A resumed session persists the cancellation too, so the log
+        // records the decision instead of the stale plan-file phase.
+        state.phase = "off";
+        if (isResume) persistState();
+      }
+    } else if (planFileMissing) {
+      // Headless run: no UI to prompt, so fall back silently.
+      state.planFileName = DEFAULT_PLAN_FILE_NAME;
+      persistState();
+    } else if (isResume || state.phase !== "off") {
+      // A resumed session (or one started with the flag) keeps its phase
+      // in the entry log, so the next session restores the same phase.
       persistState();
     }
 
