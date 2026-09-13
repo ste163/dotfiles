@@ -28,8 +28,10 @@ import {
   completeMessage,
   executionContextMessage,
   executeMessage,
+  formatCorrectionMessage,
   overviewContextMessage,
   planFileContextMessage,
+  planFileCorrectionMessage,
   todoListMessage,
   writePlanFileMessage,
 } from "./messages.ts";
@@ -38,6 +40,7 @@ import {
   extractTodoItems,
   isSafeCommand,
   markCompletedSteps,
+  planFormatIssue,
   toBaseName,
   type TodoItem,
   withMdExt,
@@ -47,11 +50,24 @@ type Phase = "off" | "overview" | "plan-file" | "executing";
 
 const WRITE_TOOL_NAMES: readonly string[] = ["write", "edit"];
 
-/** Context messages injected per phase; filtered out of history while off. */
-const CONTEXT_TYPES: readonly string[] = [
+/** Display and trigger artifacts; they never enter the model's context. */
+const DROPPED_TYPES: readonly string[] = [
+  "plan-mode-todo-list",
+  "plan-mode-execute",
+  "plan-mode-complete",
+];
+
+/**
+ * Steering messages. Only the newest copy of each enters the model's
+ * context, and only while plan mode is active. When plan mode is off,
+ * none of them do. The transcript keeps every message regardless.
+ */
+const STEERING_TYPES: readonly string[] = [
   "plan-mode-overview-context",
   "plan-mode-file-context",
   "plan-mode-execution-context",
+  "plan-mode-plan-format",
+  "plan-mode-write-file",
 ];
 
 interface PlanModeState {
@@ -62,6 +78,8 @@ interface PlanModeState {
   toolsBeforeOverview: string[] | null;
   /** Below-editor status widget handle; never persisted. */
   statusWidget: { invalidate(): void } | null;
+  /** True after a format-correction turn was sent; cleared by a valid plan. */
+  formatWarned: boolean;
 }
 
 interface PersistedState {
@@ -76,6 +94,7 @@ const createState = (): PlanModeState => ({
   planFileName: null,
   toolsBeforeOverview: null,
   statusWidget: null,
+  formatWarned: false,
 });
 
 const isAssistantMessage = (message: AgentMessage): message is AssistantMessage =>
@@ -86,6 +105,25 @@ const getTextContent = (message: AssistantMessage): string =>
 
 const planFileExists = (name: string, deps: PlanModeDeps): boolean =>
   deps.existsSync(join(deps.cwd(), name));
+
+// The plan file is the source of truth in the plan-file phase: the agent
+// writes the plan into it, and every read back uses the file, never the
+// chat message that announced the write.
+const planFileContent = (state: PlanModeState, deps: PlanModeDeps): string | null => {
+  // SAFETY: callers only run in plan-file phase, which locks the name.
+  const lockedName = state.planFileName as string;
+  return deps.readFileSync(join(deps.cwd(), lockedName));
+};
+
+const planFileIssue = (state: PlanModeState, content: string | null): string => {
+  // SAFETY: the plan-file phase guarantees a locked plan file name.
+  const lockedName = state.planFileName as string;
+  if (content === null) return `${lockedName} is missing`;
+  if (content.trim() === "") return `${lockedName} is blank`;
+  // SAFETY: non-empty content that extracted nothing, so planFormatIssue
+  // names the exact problem instead of returning null.
+  return planFormatIssue(content) as string;
+};
 
 // The status line mirrors the hooks widget's frame - accent label, two
 // spaces, colored state - so the below-editor statuses share one format.
@@ -104,7 +142,7 @@ const renderPlanStatus = (state: PlanModeState, theme: Theme): string[] => {
 
 export const createPlanModeExtension = (
   pi: ExtensionAPI,
-  deps: PlanModeDeps = defaultDeps,
+  deps: PlanModeDeps = defaultDeps(),
 ): void => {
   const state = createState();
 
@@ -196,6 +234,19 @@ export const createPlanModeExtension = (
       state.planFileName = chosen;
     }
 
+    // SAFETY: the name lock above guarantees a non-null plan file name.
+    const lockedName = state.planFileName as string;
+
+    // The extension creates the file blank; the model only populates it.
+    // The blank file is the success signal the agent writes after, so the
+    // model never has to decide whether to create the file itself.
+    if (!planFileExists(lockedName, deps)) {
+      if (!deps.writeFileSync(join(deps.cwd(), lockedName), "")) {
+        ctx.ui.notify(`Could not create ${lockedName}. Write to file was cancelled.`, "error");
+        return false;
+      }
+    }
+
     // No-op unless coming from overview: only overview filters the tools.
     leaveOverview();
 
@@ -203,12 +254,7 @@ export const createPlanModeExtension = (
     updateStatus(ctx);
     persistState();
 
-    // SAFETY: the name lock above guarantees a non-null plan file name.
-    const lockedName = state.planFileName as string;
-    if (state.todos.length > 0) {
-      pi.sendMessage(todoListMessage(state.todos), { deliverAs: "followUp" });
-    }
-    pi.sendMessage(writePlanFileMessage(lockedName), {
+    pi.sendMessage(writePlanFileMessage(lockedName, state.todos), {
       triggerTurn: true,
       deliverAs: "followUp",
     });
@@ -287,13 +333,30 @@ export const createPlanModeExtension = (
   });
 
   pi.on("context", (event) => {
-    if (state.phase !== "off") return;
+    const lastSteeringIndex = new Map<string, number>();
+    event.messages.forEach((message, index) => {
+      const customType = (message as AgentMessage & { customType?: string }).customType;
+      if (customType !== undefined && STEERING_TYPES.includes(customType)) {
+        lastSteeringIndex.set(customType, index);
+      }
+    });
 
     return {
-      messages: event.messages.filter((m) => {
+      messages: event.messages.filter((m, index) => {
         const msg = m as AgentMessage & { customType?: string };
-        if (msg.customType !== undefined && CONTEXT_TYPES.includes(msg.customType)) return false;
-        if (msg.role !== "user") return true;
+        const customType = msg.customType;
+
+        if (customType !== undefined && DROPPED_TYPES.includes(customType)) {
+          // Display and trigger artifacts never enter the model's context.
+          return false;
+        }
+        if (customType !== undefined && STEERING_TYPES.includes(customType)) {
+          // Only the newest steering copy survives, and only while plan
+          // mode is active. Off drops every plan-mode message.
+          return state.phase !== "off" && lastSteeringIndex.get(customType) === index;
+        }
+
+        if (msg.role !== "user" || state.phase !== "off") return true;
 
         const content = msg.content;
         if (typeof content === "string") {
@@ -309,14 +372,32 @@ export const createPlanModeExtension = (
     };
   });
 
+  pi.on("message_update", (event, ctx) => {
+    if (state.phase !== "executing" || state.todos.length === 0) return;
+    if (!isAssistantMessage(event.message)) return;
+
+    const result = markCompletedSteps(getTextContent(event.message), state.todos);
+    if (result.completed > 0) {
+      state.todos = result.todos;
+      updateStatus(ctx);
+    }
+  });
+
   pi.on("before_agent_start", () => {
     if (state.phase === "overview") {
       return { message: overviewContextMessage };
     }
 
     if (state.phase === "plan-file") {
-      // SAFETY: the plan-file phase guarantees a locked plan file name.
-      return { message: planFileContextMessage(state.planFileName as string) };
+      // The write instruction repeats only while the file has no plan, so
+      // a written plan does not leave a stale instruction in later turns.
+      const content = planFileContent(state, deps);
+      const extracted = content === null ? [] : extractTodoItems(content);
+      if (extracted.length === 0) {
+        // SAFETY: the plan-file phase guarantees a locked plan file name.
+        return { message: planFileContextMessage(state.planFileName as string) };
+      }
+      return;
     }
 
     if (state.phase === "executing" && state.todos.length > 0) {
@@ -352,54 +433,95 @@ export const createPlanModeExtension = (
 
     if ((state.phase !== "overview" && state.phase !== "plan-file") || !ctx.hasUI) return;
 
-    const lastAssistant = event.messages.findLast(isAssistantMessage);
-    if (lastAssistant) {
-      const extracted = extractTodoItems(getTextContent(lastAssistant));
-      if (extracted.length > 0) state.todos = extracted;
-    }
-
-    persistState();
-
-    if (state.phase === "overview") {
-      const choice = await ctx.ui.select("Plan mode - what next?", [
-        "Continue planning",
-        "Write plan to file",
-        "Execute plan",
-      ]);
-
-      if (choice === "Write plan to file") {
-        await startPlanFile(ctx);
-        return;
-      }
-
-      if (choice === "Execute plan") {
-        if (state.todos.length === 0) {
-          ctx.ui.notify("No numbered plan found yet. Continue planning first.", "info");
+    // plan-file phase: the plan file is the source of truth. The chat
+    // message is not consulted - the agent writes the plan into the file,
+    // so its reply can be anything without triggering a correction.
+    if (state.phase === "plan-file") {
+      const content = planFileContent(state, deps);
+      const extracted = content === null ? [] : extractTodoItems(content);
+      if (extracted.length > 0) {
+        state.todos = extracted;
+        state.formatWarned = false;
+      } else {
+        const issue = planFileIssue(state, content);
+        if (!state.formatWarned) {
+          state.formatWarned = true;
+          ctx.ui.notify("Plan file invalid - asking for a rewrite", "warning");
+          // SAFETY: the plan-file phase guarantees a locked plan file name.
+          pi.sendMessage(planFileCorrectionMessage(issue, state.planFileName as string), {
+            deliverAs: "followUp",
+            triggerTurn: true,
+          });
+          persistState();
           return;
         }
-        leaveOverview();
+        // A repeat failure only notifies; the corrective turn cannot loop.
+        ctx.ui.notify(issue, "warning");
+      }
+
+      persistState();
+
+      if (state.todos.length === 0) return;
+
+      const choice = await ctx.ui.select("Plan mode - what next?", [
+        "Execute the plan",
+        "Continue planning",
+        "Refine the plan",
+      ]);
+
+      if (choice === "Execute the plan") {
         startExecuting(ctx);
+      } else if (choice === "Refine the plan") {
+        const refinement = await ctx.ui.editor("Refine the plan:", "");
+        if (refinement?.trim()) {
+          pi.sendMessage(todoListMessage(state.todos), { deliverAs: "followUp" });
+          pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
+        }
       }
       return;
     }
 
-    // plan-file phase: execution needs an extracted numbered plan.
-    if (state.todos.length === 0) return;
-
-    const choice = await ctx.ui.select("Plan mode - what next?", [
-      "Execute the plan",
-      "Continue planning",
-      "Refine the plan",
-    ]);
-
-    if (choice === "Execute the plan") {
-      startExecuting(ctx);
-    } else if (choice === "Refine the plan") {
-      const refinement = await ctx.ui.editor("Refine the plan:", "");
-      if (refinement?.trim()) {
-        pi.sendMessage(todoListMessage(state.todos), { deliverAs: "followUp" });
-        pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
+    // overview phase: extraction reads the assistant message.
+    const lastAssistant = event.messages.findLast(isAssistantMessage);
+    if (lastAssistant) {
+      const text = getTextContent(lastAssistant);
+      const extracted = extractTodoItems(text);
+      if (extracted.length > 0) {
+        state.todos = extracted;
+        state.formatWarned = false;
+      } else {
+        // SAFETY: extraction is empty, so planFormatIssue names a problem.
+        const issue = planFormatIssue(text) as string;
+        if (!state.formatWarned) {
+          state.formatWarned = true;
+          ctx.ui.notify("Plan format invalid - asking for a rewrite", "warning");
+          pi.sendMessage(formatCorrectionMessage(issue), {
+            deliverAs: "followUp",
+            triggerTurn: true,
+          });
+          persistState();
+          return;
+        }
+        // A repeat failure only notifies; the corrective turn cannot loop.
+        ctx.ui.notify(issue, "warning");
       }
+    }
+
+    persistState();
+
+    const baseChoices = ["Continue planning", "Write plan to file"];
+    const choices = state.todos.length > 0 ? [...baseChoices, "Execute plan"] : baseChoices;
+    const choice = await ctx.ui.select("Plan mode - what next?", choices);
+
+    if (choice === "Write plan to file") {
+      await startPlanFile(ctx);
+      return;
+    }
+
+    if (choice === "Execute plan") {
+      // SAFETY: the Execute plan option only exists when todos exist.
+      leaveOverview();
+      startExecuting(ctx);
     }
   });
 
@@ -441,7 +563,6 @@ export const createPlanModeExtension = (
     }
 
     const isResume = planEntry !== undefined;
-    let persisted = false;
 
     if (isResume && state.phase === "executing" && state.todos.length > 0) {
       // Scan only messages after the last execute marker, so [DONE:n] tags
@@ -462,31 +583,28 @@ export const createPlanModeExtension = (
       state.todos = markCompletedSteps(messages.map(getTextContent).join("\n"), state.todos).todos;
     }
 
-    if (
+    const planFileMissing =
       state.phase === "plan-file" &&
-      (state.planFileName === null || !planFileExists(state.planFileName, deps))
-    ) {
-      if (ctx.hasUI) {
-        const chosen = await promptForPlanFileName(ctx);
-        if (chosen !== null) {
-          state.planFileName = chosen;
-          persistState();
-          persisted = true;
-        } else {
-          state.phase = "off";
-        }
-      } else {
-        // Headless run: no UI to prompt, so fall back silently.
-        state.planFileName = DEFAULT_PLAN_FILE_NAME;
-        persistState();
-        persisted = true;
-      }
-    }
+      (state.planFileName === null || !planFileExists(state.planFileName, deps));
 
-    // A resumed session (or one started with the flag) keeps its phase in
-    // the entry log, so the next session restores the same phase. Resumed
-    // sessions also persist a cancellation, so the log reflects the decision.
-    if (!persisted && (isResume || state.phase !== "off")) {
+    if (planFileMissing && ctx.hasUI) {
+      const chosen = await promptForPlanFileName(ctx);
+      if (chosen !== null) {
+        state.planFileName = chosen;
+        persistState();
+      } else {
+        // A resumed session persists the cancellation too, so the log
+        // records the decision instead of the stale plan-file phase.
+        state.phase = "off";
+        if (isResume) persistState();
+      }
+    } else if (planFileMissing) {
+      // Headless run: no UI to prompt, so fall back silently.
+      state.planFileName = DEFAULT_PLAN_FILE_NAME;
+      persistState();
+    } else if (isResume || state.phase !== "off") {
+      // A resumed session (or one started with the flag) keeps its phase
+      // in the entry log, so the next session restores the same phase.
       persistState();
     }
 

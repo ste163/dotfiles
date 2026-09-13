@@ -7,6 +7,7 @@ import {
   extractTodoItems,
   isSafeCommand,
   markCompletedSteps,
+  planFormatIssue,
   toBaseName,
   type TodoItem,
   withMdExt,
@@ -75,11 +76,10 @@ test("cleanStepText", async (t) => {
     assert.equal(cleanStepText(""), "");
   });
 
-  await t.test("truncates long text with ellipsis", () => {
-    const long = "x".repeat(80);
-    const result = cleanStepText(long);
-    assert.equal(result.length, 50);
-    assert.ok(result.endsWith("..."));
+  await t.test("keeps long step text in full", () => {
+    const long = `A ${"word ".repeat(30)}step`;
+    assert.equal(cleanStepText(long), long);
+    assert.ok(long.length > 50);
   });
 });
 
@@ -97,6 +97,42 @@ test("extractTodoItems", async (t) => {
     assert.equal(items[0]?.completed, false);
   });
 
+  await t.test("accepts a markdown heading header", () => {
+    assert.deepEqual(extractTodoItems("## Plan\n1. First step here"), [
+      { step: 1, text: "First step here", completed: false },
+    ]);
+  });
+
+  await t.test("accepts a bold header", () => {
+    assert.deepEqual(extractTodoItems("**Plan:**\n1. First step here"), [
+      { step: 1, text: "First step here", completed: false },
+    ]);
+  });
+
+  await t.test("accepts a header without a colon", () => {
+    assert.deepEqual(extractTodoItems("Plan\n1. First step here"), [
+      { step: 1, text: "First step here", completed: false },
+    ]);
+  });
+
+  await t.test("accepts a step ending in a closing paren", () => {
+    assert.deepEqual(extractTodoItems("Plan:\n1) First step here"), [
+      { step: 1, text: "First step here", completed: false },
+    ]);
+  });
+
+  await t.test("keeps bold in the middle of a step line", () => {
+    assert.deepEqual(extractTodoItems("Plan:\n1. Keep **bold** words here"), [
+      { step: 1, text: "Keep bold words here", completed: false },
+    ]);
+  });
+
+  await t.test("keeps a fully bold step", () => {
+    assert.deepEqual(extractTodoItems("Plan:\n1. **Do the thing**"), [
+      { step: 1, text: "Do the thing", completed: false },
+    ]);
+  });
+
   await t.test("ignores short or non-step lines", () => {
     const message =
       "Plan:\n1. ok\n2. `code span line`\n3. - dash line\n4. A real actionable step\n5. Run the x";
@@ -108,6 +144,37 @@ test("extractTodoItems", async (t) => {
   await t.test("drops steps that clean down to three characters or fewer", () => {
     const items = extractTodoItems("Plan:\n1. Run the x\n2. A real step here");
     assert.deepEqual(items, [{ step: 1, text: "A real step here", completed: false }]);
+  });
+
+  await t.test("ignores a Plan-like line that is not a header", () => {
+    assert.deepEqual(extractTodoItems("**Plan Steps (10):**\n1. A real step here"), []);
+  });
+});
+
+test("planFormatIssue", async (t) => {
+  await t.test("reports a missing header", () => {
+    assert.equal(
+      planFormatIssue("just some text"),
+      "missing a 'Plan:' header line at the end of the response",
+    );
+  });
+
+  await t.test("reports missing numbered steps", () => {
+    assert.equal(
+      planFormatIssue("Plan:\nno steps here"),
+      "no numbered steps after the 'Plan:' header",
+    );
+  });
+
+  await t.test("reports steps that fail parsing", () => {
+    assert.equal(
+      planFormatIssue("Plan:\n1. ok\n2. - dash line"),
+      "numbered steps could not be parsed into plan steps",
+    );
+  });
+
+  await t.test("returns null for a valid plan", () => {
+    assert.equal(planFormatIssue("Plan:\n1. First step here"), null);
   });
 });
 

@@ -33,18 +33,87 @@ session in overview.
    numbered plan under a `Plan:` header — in the conversation only.
 3. At the end of the turn, choose one:
    - `Continue planning` — keep discussing.
-   - `Write plan to file` — name the plan file; the agent writes the
-     numbered plan into it. Only that file is writable.
+   - `Write plan to file` — name the plan file. The extension creates it
+     blank on disk, then the agent writes the numbered plan into it.
+     Only that file is writable.
    - `Execute plan` — skip the file; full access returns and the plan is
      executed with progress tracking.
 4. In the plan-file phase the same choice appears, plus `Refine the plan`.
-5. The agent marks each finished step with a `[DONE:n]` tag.
+5. The agent marks each finished step with exactly one `[DONE:n]` tag,
+   in the same turn that completes the step.
+
+## Step rules
+
+Injected into the context every turn while executing:
+
+- A step is complete only when its signal arrived in that turn: a tool
+  result, a command output, or a user message. Background events are not
+  signals.
+- Exactly one `[DONE:n]` tag per step, in the turn that completes it.
+  Never batch tags, never pre-claim, never tag in a later turn.
+
+Injected while overview is active:
+
+- Write one action per step. Split steps that end at different times.
+
+When all steps complete, the extension sends an automatic completion
+notice. The plan is done. The agent does not respond to that notice; it
+waits for the user's next message.
+
+Plan-mode messages never linger in the model's context: display and
+trigger artifacts are dropped, and only the newest steering copy stays
+while plan mode is active. The transcript keeps every message. The
+model's knowledge that the plan is complete comes from its own closing
+response, not from plan-mode messages.
+
+Step marks appear live: plan-mode watches the assistant stream and flips
+a todo the moment its `[DONE:n]` tag completes, refreshing the widget.
+The turn-end pass persists and stays as the backstop.
+
+## Paths
+
+```mermaid
+flowchart TD
+    A[Activate plan mode] --> B["Overview: discuss the plan"]
+    B --> D[Execute the plan]
+    B --> C[Write plan to file]
+    C --> E[Refine the plan]
+    E --> C
+    E --> D
+    D --> F[Iterates over Todos until complete]
+```
+
+Overview can execute the plan directly, or write it to a file first. Once
+written, refine the file until it is ready, then execute. The plan is done
+when every step completes.
+
+## Plan format
+
+The execute option appears only when a plan parses. The required shape:
+
+```text
+Plan:
+1. First step description
+2. Second step description
+```
+
+- The `Plan` header line accepts markdown forms: `Plan:`, `Plan`,
+  `## Plan`, or `**Plan:**`.
+- Steps are lines that start with a number and a period or a closing
+  paren. Markdown inside a step is stripped.
+- Step text is kept in full. Long steps wrap in the display.
+- When the last response has no parseable plan, the agent gets one
+  corrective turn that restates the format and the exact problem. The
+  execute option stays hidden until a plan parses.
 
 ## Plan file rules
 
 - The name is asked once when moving to the plan-file phase. It is reused
   while the file still exists on disk. A name collision with an existing
   file forces a new prompt.
+- The extension creates the plan file blank and the agent populates it.
+  The plan parses from the file, not from the chat message, so Execute
+  and Refine appear only when the file holds a valid plan.
 - Only the basename is kept. Directory parts are stripped, so the file
   always lives in the cwd.
 - The phase persists across sessions. A session that resumes in plan-file

@@ -13,7 +13,11 @@ model of the Copilot CLI and Claude Code.
 4. An `agent_settled` hook runs when the agent settles. A failure shows a
    notification and is injected into the session, so the agent sees the
    output and starts a turn to fix it. It does not block the session.
-5. A bad config disables the hooks and shows a warning at session start.
+5. A user abort is a hard stop. When the agent settles because the user
+   pressed Escape, no settled hook runs and nothing re-engages the agent.
+6. A bad config disables the hooks and shows a warning at session start.
+7. Hooks run only for trusted projects. Trust granted mid-session
+   activates hooks on the next event.
 
 ## Config
 
@@ -59,7 +63,9 @@ stderr become the reason, truncated to 300 characters.
 A failure shows a notification with the hook output, truncated to 300
 characters. It does not block the session. The failure is also injected
 into the session, so the agent sees the output and starts a turn to fix
-it. The failed status stays visible until a later run passes. While the
+it. The injected copy keeps the last 10,000 characters, so failure
+details and the coverage report survive; the notification keeps the
+short tail. The failed status stays visible until a later run passes. While the
 last run failed, every settle re-runs the hook - even without new edits,
 so a failure fixed through bash still gets re-verified. The failure
 message is injected on the first failure, again when the agent edits
@@ -69,7 +75,8 @@ with no new changes only refreshes the status, so the loop cannot run
 forever. A settle that fires while the hook is still running is skipped.
 With `"dirty"`, the flag clears after the hook runs, success or failure.
 If the hook never ran, the failure still carries the retry obligation
-and the next settle re-runs.
+and the next settle re-runs. A settle caused by a user abort runs no
+hook at all and sends no message - Escape is a hard stop.
 
 ## Recipes
 

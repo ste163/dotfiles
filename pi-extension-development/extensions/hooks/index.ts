@@ -41,6 +41,8 @@ interface HooksState {
   lastFailure: string | null;
   status: HookStatus | null;
   widget: { invalidate(): void } | null;
+  /** True when the current run ended because the user aborted it. */
+  abortedByUser: boolean;
 }
 
 interface ConfigState {
@@ -63,6 +65,7 @@ const createState = (): HooksState => ({
   lastFailure: null,
   status: null,
   widget: null,
+  abortedByUser: false,
 });
 
 const createConfigState = (): ConfigState => ({ loaded: false, config: null, error: null });
@@ -88,6 +91,9 @@ const tail = (text: string, max = 300): string => {
   return trimmed.length <= max ? trimmed : trimmed.slice(-max);
 };
 
+/** The steered failure message keeps enough tail to include diffs and coverage reports. */
+const FAILURE_MESSAGE_MAX = 10_000;
+
 /** Combined hook output: stdout and stderr, whichever the hook wrote to. */
 const outputOf = (result: ExecResult): string => {
   const stdout = result.stdout.trim();
@@ -97,9 +103,9 @@ const outputOf = (result: ExecResult): string => {
   return `${stdout}\n${stderr}`;
 };
 
-const describeFailure = (result: ExecResult): string => {
+const describeFailure = (result: ExecResult, max = 300): string => {
   const prefix = result.killed ? "Hook timed out" : `Hook failed (exit ${result.code})`;
-  const output = tail(outputOf(result));
+  const output = tail(outputOf(result), max);
   return output === "" ? prefix : `${prefix}: ${output}`;
 };
 
@@ -138,6 +144,7 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
   };
 
   pi.on("session_start", (_event, ctx) => {
+    if (!ctx.isProjectTrusted()) return;
     ensureConfig(ctx.cwd);
     if (configState.error) {
       ctx.ui.notify(configState.error, "warning");
@@ -165,12 +172,28 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
 
   // A failed status stays visible until a later run passes, so an unfixed
   // failure is not silently cleared by the next turn. Running and complete
-  // statuses are transient and clear as before.
+  // statuses are transient and clear as before. A new turn is a fresh run,
+  // so an abort from an earlier turn no longer applies.
   pi.on("turn_start", () => {
+    state.abortedByUser = false;
     if (state.status?.kind !== "failed") updateStatus(state, null);
   });
 
+  pi.on("turn_end", (event) => {
+    const message = event.message;
+    if (message.role === "assistant" && message.stopReason === "aborted")
+      state.abortedByUser = true;
+  });
+
+  pi.on("agent_end", (event) => {
+    const aborted = event.messages.findLast(
+      (message) => message.role === "assistant" && message.stopReason === "aborted",
+    );
+    if (aborted) state.abortedByUser = true;
+  });
+
   pi.on("tool_call", async (event, ctx) => {
+    if (!ctx.isProjectTrusted()) return;
     ensureConfig(ctx.cwd);
     if (configState.error || !configState.config) return;
 
@@ -199,6 +222,11 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    if (!ctx.isProjectTrusted()) return;
+    // A user abort is a hard stop: no hook runs and nothing re-engages the
+    // agent. The signal check also covers aborts before any assistant
+    // message was finalized, which the message check cannot see.
+    if (ctx.signal?.aborted || state.abortedByUser) return;
     ensureConfig(ctx.cwd);
     if (configState.error || !configState.config) return;
 
@@ -227,17 +255,20 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       if (failedRun) {
         const failure = describeFailure(result);
         ctx.ui.notify(failure, "error");
+        // The toast keeps a short tail; the steered message keeps a long
+        // one, so diffs and the coverage report reach the agent in one turn.
+        const steered = describeFailure(result, FAILURE_MESSAGE_MAX);
         // Steer the agent on the first failure, when it edited files and
         // still failed, and when the failure message changed - new output
         // is new information. A repeated identical failure with no new
         // changes only refreshes the status, so the loop cannot run forever.
-        if (!wasFailed || dirtyRun || failure !== state.lastFailure) {
+        if (!wasFailed || dirtyRun || steered !== state.lastFailure) {
           pi.sendMessage(
-            { customType: "hooks-failure", content: failure, display: true },
+            { customType: "hooks-failure", content: steered, display: true },
             { deliverAs: "steer", triggerTurn: true },
           );
         }
-        state.lastFailure = failure;
+        state.lastFailure = steered;
       } else {
         state.lastFailure = null;
         const output = tail(outputOf(result));

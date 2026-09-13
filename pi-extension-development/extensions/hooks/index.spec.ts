@@ -90,7 +90,10 @@ const createFakeTheme = (): FakeTheme => ({
   fg: (color, text) => `${color}:${text}`,
 });
 
-const createFakeCtx = (): {
+const createFakeCtx = (
+  trust: { trusted: boolean } = { trusted: true },
+  signal: { aborted: boolean } | null = null,
+): {
   ctx: ExtensionContext;
   notifications: Notification[];
   widgets: WidgetMount[];
@@ -99,6 +102,8 @@ const createFakeCtx = (): {
   const widgets: WidgetMount[] = [];
   const ctx = {
     cwd: "/virtual/repo",
+    isProjectTrusted: () => trust.trusted,
+    signal: signal ?? { aborted: false },
     ui: {
       notify: (message: string, type?: string) => {
         notifications.push(type ? { message, type } : { message });
@@ -174,9 +179,11 @@ test("registers handlers that do nothing when the config file is missing", async
   const deps = createFakeDeps(null);
   createHooksExtension(pi as unknown as Pi, deps);
   assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
+    "agent_end",
     "agent_settled",
     "session_start",
     "tool_call",
+    "turn_end",
     "turn_start",
   ]);
   const { ctx, notifications } = createFakeCtx();
@@ -193,9 +200,11 @@ test("warns on session start and ignores events when the config is invalid", asy
   const deps = createFakeDeps("not json");
   createHooksExtension(pi as unknown as Pi, deps);
   assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
+    "agent_end",
     "agent_settled",
     "session_start",
     "tool_call",
+    "turn_end",
     "turn_start",
   ]);
   const { ctx, notifications } = createFakeCtx();
@@ -208,15 +217,118 @@ test("warns on session start and ignores events when the config is invalid", asy
   assert.equal(deps.execCalls.length, 0);
 });
 
+test("an untrusted project loads no config, notifies nothing, and runs no hooks", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps("not json");
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx({ trusted: false });
+
+  await callHandler(pi, "session_start", {}, ctx);
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+
+  assert.equal(deps.execCalls.length, 0);
+  assert.equal(notifications.length, 0);
+});
+
+test("trust granted mid-session activates hooks on the next event", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(FULL_CONFIG);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const trust = { trusted: false };
+  const { ctx } = createFakeCtx(trust);
+
+  await callHandler(pi, "session_start", {}, ctx);
+  await callHandler(pi, "tool_call", bashCall("echo hi"), ctx);
+  assert.equal(deps.execCalls.length, 0);
+
+  trust.trusted = true;
+  await callHandler(pi, "tool_call", bashCall("echo hi"), ctx);
+  assert.equal(deps.execCalls.length, 1);
+});
+
 test("registers all handlers for a valid config", () => {
   const pi = createFakePi();
   createHooksExtension(pi as unknown as Pi, createFakeDeps(FULL_CONFIG));
   assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
+    "agent_end",
     "agent_settled",
     "session_start",
     "tool_call",
+    "turn_end",
     "turn_start",
   ]);
+});
+
+test("an aborted settle runs no hooks and sends nothing", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(ALWAYS_SETTLED_CONFIG, [ok("passed")]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx({ trusted: true }, { aborted: true });
+
+  await callHandler(pi, "session_start", {}, ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+
+  assert.equal(deps.execCalls.length, 0);
+  assert.equal(pi.sentMessages.length, 0);
+});
+
+test("a turn that ended aborted skips the next settled hook", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(ALWAYS_SETTLED_CONFIG, [ok("passed")]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(pi, "turn_end", { message: { role: "assistant", stopReason: "aborted" } }, ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+
+  assert.equal(deps.execCalls.length, 0);
+});
+
+test("an agent_end with an aborted message skips the next settled hook", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(ALWAYS_SETTLED_CONFIG, [ok("passed")]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(
+    pi,
+    "agent_end",
+    { messages: [{ role: "assistant", stopReason: "aborted" }] },
+    ctx,
+  );
+  await callHandler(pi, "agent_settled", {}, ctx);
+
+  assert.equal(deps.execCalls.length, 0);
+});
+
+test("a new turn clears the abort flag so the next settle runs hooks", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(ALWAYS_SETTLED_CONFIG, [ok("passed")]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(pi, "turn_end", { message: { role: "assistant", stopReason: "aborted" } }, ctx);
+  await callHandler(pi, "turn_start", {}, ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+
+  assert.equal(deps.execCalls.length, 1);
+});
+
+test("a normally completed turn still runs the settled hook", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(ALWAYS_SETTLED_CONFIG, [ok("passed")]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(pi, "turn_end", { message: { role: "assistant", stopReason: "stop" } }, ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+
+  assert.equal(deps.execCalls.length, 1);
 });
 
 test("loads the config from the session cwd on the first event", async () => {
@@ -517,9 +629,11 @@ test("mounts the hooks widget on session start when a status label is configured
   const pi = createFakePi();
   createHooksExtension(pi as unknown as Pi, createFakeDeps(STATUS_CONFIG));
   assert.deepEqual(Object.keys(pi.handlers).toSorted(), [
+    "agent_end",
     "agent_settled",
     "session_start",
     "tool_call",
+    "turn_end",
     "turn_start",
   ]);
   const { ctx, widgets } = createFakeCtx();
@@ -771,6 +885,33 @@ test("combines stdout and stderr in failure notifications", async () => {
   await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.ok(notifications[0]?.message.includes("out\nerr"));
+});
+
+test("keeps the long tail in the steered failure while the notify stays short", async () => {
+  const pi = createFakePi();
+  const output = "a".repeat(500) + "b".repeat(500);
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed(output)]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(notifications[0]?.message, `Hook failed (exit 1): ${"b".repeat(300)}`);
+  assert.equal(
+    pi.sentMessages[0]?.message.content,
+    `Hook failed (exit 1): ${"a".repeat(500)}${"b".repeat(500)}`,
+  );
+});
+
+test("caps the steered failure tail at 10,000 characters", async () => {
+  const pi = createFakePi();
+  const output = "a".repeat(11_000);
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed(output)]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(notifications[0]?.message, `Hook failed (exit 1): ${"a".repeat(300)}`);
+  assert.equal(pi.sentMessages[0]?.message.content, `Hook failed (exit 1): ${"a".repeat(10_000)}`);
 });
 
 test("notifies stderr output when the hook succeeds with warnings", async () => {
