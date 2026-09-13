@@ -1,9 +1,9 @@
 # pi-extension-development
 
 Standalone TypeScript project for developing custom pi extensions used by this
-dotfiles repo. This directory is **not** part of pi's own supported config
-surface (`.pi/`) on purpose — it's a normal, independently-tooled TS project
-that happens to produce files pi loads via a symlink bridge. See the root
+dotfiles repo. This directory is **not** part of pi's supported config
+surface (`.pi/`) on purpose - it's an TS project that produces files
+pi loads via a symlink bridge. See the root
 [README.md](../README.md#extensions) for how that bridge works.
 
 ## There is no build step
@@ -11,9 +11,8 @@ that happens to produce files pi loads via a symlink bridge. See the root
 Pi loads extensions via [`jiti`](https://github.com/unjs/jiti), which runs
 `.ts` files directly at load time — nothing here is ever compiled, bundled, or
 copied. The files in `extensions/` are the exact same files pi loads through
-the symlinks in `.pi/extensions/`. "Building" in this project only ever means
-_verification_: typecheck, lint, format, test. If you're looking for a
-`dist/` or similar output directory, it doesn't exist and never will.
+the symlinks in `.pi/extensions/`. "Building" in this project only means
+_verification_: typecheck, lint, format, test. There is `dist/` or build directory.
 
 ## Workflow
 
@@ -28,8 +27,7 @@ npm test             # node --test
 
 All four commands must pass cleanly before considering any extension change
 done — see [AGENTS.md](AGENTS.md) for the full mandatory checklist an agent
-must follow, and for the testing-approach rules (dependency injection instead
-of real disk I/O, recursion/`Promise.all` instead of disabling lint rules).
+must follow, and for the testing-approach rules. 
 
 ## Automatic verification
 
