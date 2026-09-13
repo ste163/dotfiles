@@ -87,13 +87,18 @@ const getTextContent = (message: AssistantMessage): string =>
 const planFileExists = (name: string, deps: PlanModeDeps): boolean =>
   deps.existsSync(join(deps.cwd(), name));
 
+// The status line mirrors the hooks widget's frame - accent label, two
+// spaces, colored state - so the below-editor statuses share one format.
+const planStatusLine = (theme: Theme, color: "accent" | "warning", text: string): string =>
+  ` ${theme.fg("accent", "plan")}  ${theme.fg(color, text)}`;
+
 const renderPlanStatus = (state: PlanModeState, theme: Theme): string[] => {
   if (state.phase === "executing" && state.todos.length > 0) {
     const completed = state.todos.filter((t) => t.completed).length;
-    return [theme.fg("accent", `plan ${completed}/${state.todos.length}`)];
+    return [planStatusLine(theme, "accent", `executing ${completed}/${state.todos.length}`)];
   }
-  if (state.phase === "overview") return [theme.fg("warning", "plan: overview")];
-  if (state.phase === "plan-file") return [theme.fg("warning", "plan: file")];
+  if (state.phase === "overview") return [planStatusLine(theme, "warning", "overview")];
+  if (state.phase === "plan-file") return [planStatusLine(theme, "warning", "file")];
   return [];
 };
 

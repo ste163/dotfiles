@@ -35,9 +35,9 @@ The `hooks` extension runs the checklist automatically. After the agent edits
 a file under `extensions/` (or a root config file), the `agent_settled` hook
 runs `scripts/hooks/verify.sh` — typecheck, lint, format:check, and test. The
 result shows in the UI; a failure does not block the session. The config is
-`.pi/hooks.json`. The hook uses `format:check`, not `format`, so it never
-rewrites files mid-session — run `npm run format` yourself when it reports a
-formatting failure.
+`.pi/hooks.json`. When `format:check` fails, the hook runs `npm run format`
+(repo-wide) and re-runs the checklist, so formatting fixes itself. Typecheck,
+lint, and test failures are not auto-fixed and still need a manual repair.
 
 ## Adding a new extension
 

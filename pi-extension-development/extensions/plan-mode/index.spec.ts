@@ -241,7 +241,7 @@ test("toggle on enters overview, filters write/edit tools, notifies, and persist
   await pi.commands["plan"]?.handler(undefined, ctx);
 
   assert.ok(notifications.some((n) => n.message.includes("overview")));
-  assert.deepEqual(statusWidget.component?.render(), ["plan: overview"]);
+  assert.deepEqual(statusWidget.component?.render(), [" plan  overview"]);
   assert.deepEqual(pi.activeTools, ["read", "bash", "grep", "find", "ls"]);
   assert.deepEqual(lastEntryData(pi), {
     phase: "overview",
@@ -821,7 +821,7 @@ test("Continue planning keeps the plan-file phase", async () => {
   const { ctx, statusWidget } = createFakeCtx({ entries, selectResponses: ["Continue planning"] });
   await callHandler(pi, "session_start", {}, ctx);
 
-  assert.deepEqual(statusWidget.component?.render(), ["plan: file"]);
+  assert.deepEqual(statusWidget.component?.render(), [" plan  file"]);
 
   await callHandler(
     pi,
@@ -1113,7 +1113,7 @@ test("marks DONE steps at turn end and updates the status widget", async () => {
 
   await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("[DONE:1]")]) }, ctx);
 
-  assert.deepEqual(statusWidget.component?.render(), ["plan 1/2"]);
+  assert.deepEqual(statusWidget.component?.render(), [" plan  executing 1/2"]);
   assert.equal(statusWidget.placement, "belowEditor");
   assert.deepEqual(widgetUpdates.at(-1), ["[x] a", "[ ] b"]);
   assert.deepEqual(lastEntryData(pi).todos, [

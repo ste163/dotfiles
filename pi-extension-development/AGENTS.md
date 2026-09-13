@@ -60,16 +60,19 @@ config files), the hook runs typecheck, lint, format:check, and test. The
 result shows in the UI. Do not run these commands manually. The hook is the
 gate.
 
-One manual action remains. The hook uses `format:check`, not `format`, so it
-never rewrites files mid-session. If the hook reports a formatting failure,
-run `npm run format` yourself.
+One manual action remains for non-formatting failures. The hook runs
+`format:check` first; when it fails, the hook runs `npm run format`
+(repo-wide) and re-runs the whole checklist, so formatting fixes itself.
+Typecheck, lint, and test failures are never auto-fixed - repair those
+yourself and let the next settle re-verify.
 
 What the hook runs (for reference):
 
 ```sh
 npm run typecheck    # tsc --noEmit
 npm run lint         # oxlint
-npm run format:check # oxfmt --check
+npm run format:check # oxfmt --check; on failure the hook runs npm run format
+                     # repo-wide and re-runs this whole checklist
 npm test             # node --test, includes the structure.spec.ts hard-rule check
 ```
 
@@ -77,7 +80,7 @@ npm test             # node --test, includes the structure.spec.ts hard-rule che
 - `npm run lint` must report zero errors (categories enabled: `correctness`,
   `suspicious`, `perf` — real bug detection only, not style opinions).
 - Committed code must match oxfmt's output exactly. The hook checks this with
-  `format:check`. Run `npm run format` when it fails.
+  `format:check` and auto-fixes it repo-wide when it fails.
 - `npm test` must pass at 100%, and **100% test coverage is required** for
   every extension. (Coverage enforcement mechanism is still being finalized —
   see the note in the root `extension-setup.md` plan — but the expectation
