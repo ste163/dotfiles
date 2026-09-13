@@ -1,6 +1,6 @@
 {
   "permission": {
-    "*": "ask",
+    "*": "allow",
     "edit": "allow",
     "write": "allow",
     "mcp": "allow",
