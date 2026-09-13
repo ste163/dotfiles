@@ -15,7 +15,7 @@ Do this:
 - Ask clarifying questions about the task before proposing a plan.
 - Study the code as much as you need with read-only tools and commands.
 - Present options and tradeoffs when the approach is not obvious.
-- End with a numbered plan under a "Plan:" header, in your response only.
+- End with a numbered plan under a "Plan:" header, as the final section of your response. Put nothing after the numbered steps.
 
 Do NOT write or edit any file. Do NOT attempt any change. Wait for the user to continue planning, write the plan to a file, or execute it.`,
   display: false,
@@ -45,6 +45,21 @@ ${todos.flatMap((t) => (t.completed ? [] : [`${t.step}. ${t.text}`])).join("\n")
 Execute each step in order.
 After completing a step, include a [DONE:n] tag in your response.`,
   display: false,
+});
+
+export const formatCorrectionMessage = (issue: string): CustomMessage => ({
+  customType: "plan-mode-plan-format",
+  content: `[PLAN MODE ACTIVE]
+Your last response did not parse as a plan: ${issue}.
+
+End your response with the plan in exactly this format, as the final section:
+
+Plan:
+1. First step description
+2. Second step description
+
+Use a "Plan:" header line and numbered steps only. Put nothing after the numbered steps.`,
+  display: true,
 });
 
 export const todoListMessage = (todos: TodoItem[]): CustomMessage => ({

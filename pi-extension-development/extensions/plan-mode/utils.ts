@@ -145,24 +145,55 @@ export const cleanStepText = (text: string): string => {
 const isPlanStepCandidate = (text: string): boolean =>
   text.length > 5 && !text.startsWith("`") && !text.startsWith("/") && !text.startsWith("-");
 
+// A plan header is a line of its own: optional markdown hashes, then
+// "Plan" with an optional colon, wrapped in optional bold markers.
+// Markdown headings are natural for the model, so the parser accepts them
+// instead of demanding one exact form.
+const PLAN_HEADER_PATTERN = /^[ \t]*(?:#{1,6}[ \t]+)?\*{0,2}Plan:?\*{0,2}[ \t]*$/im;
+
+// Numbered steps capture the whole line. cleanStepText strips markdown
+// inside the text, so mid-line bold or code spans do not cut the capture
+// short the way a stop-at-first-asterisk pattern would.
+const NUMBERED_STEP_PATTERN = /^[ \t]*(\d+)[.)][ \t]+(.+?)[ \t]*$/gm;
+
+const stripBoldMarkers = (text: string): string =>
+  text
+    .replace(/^\*{1,2}/, "")
+    .replace(/\*{1,2}$/, "")
+    .trim();
+
 export const extractTodoItems = (message: string): TodoItem[] => {
-  const headerMatch = message.match(/\*{0,2}Plan:\*{0,2}\s*\n/i);
+  const headerMatch = message.match(PLAN_HEADER_PATTERN);
   if (!headerMatch) return [];
 
   const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
-  const numberedPattern = /^\s*(\d+)[.)]\s+\*{0,2}([^*\n]+)/gm;
 
-  return Array.from(planSection.matchAll(numberedPattern))
+  return Array.from(planSection.matchAll(NUMBERED_STEP_PATTERN))
     .map((match) =>
-      // SAFETY: the regex requires ([^*\n]+) to match, so group 2 is present.
-      (match[2] as string)
-        .trim()
-        .replace(/\*{1,2}$/, "")
-        .trim(),
+      // SAFETY: the regex requires (.+?) to match, so group 2 is present.
+      stripBoldMarkers(match[2] as string),
     )
     .flatMap((text) => (isPlanStepCandidate(text) ? [cleanStepText(text)] : []))
     .filter((cleaned) => cleaned.length > 3)
     .map((text, index) => ({ step: index + 1, text, completed: false }));
+};
+
+/**
+ * Names the exact reason a message does not parse as a plan, or null when
+ * it does. Callers show the reason to the user and the model, so a failed
+ * parse always carries an actionable fix instead of a dead end.
+ */
+export const planFormatIssue = (message: string): string | null => {
+  const headerMatch = message.match(PLAN_HEADER_PATTERN);
+  if (!headerMatch) return "missing a 'Plan:' header line at the end of the response";
+
+  const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
+  const numbered = planSection.match(/^[ \t]*\d+[.)][ \t]+.+/gm);
+  if (numbered === null) return "no numbered steps after the 'Plan:' header";
+
+  return extractTodoItems(message).length === 0
+    ? "numbered steps could not be parsed into plan steps"
+    : null;
 };
 
 export const extractDoneSteps = (message: string): number[] =>

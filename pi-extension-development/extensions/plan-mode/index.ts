@@ -28,6 +28,7 @@ import {
   completeMessage,
   executionContextMessage,
   executeMessage,
+  formatCorrectionMessage,
   overviewContextMessage,
   planFileContextMessage,
   todoListMessage,
@@ -38,6 +39,7 @@ import {
   extractTodoItems,
   isSafeCommand,
   markCompletedSteps,
+  planFormatIssue,
   toBaseName,
   type TodoItem,
   withMdExt,
@@ -62,6 +64,8 @@ interface PlanModeState {
   toolsBeforeOverview: string[] | null;
   /** Below-editor status widget handle; never persisted. */
   statusWidget: { invalidate(): void } | null;
+  /** True after a format-correction turn was sent; cleared by a valid plan. */
+  formatWarned: boolean;
 }
 
 interface PersistedState {
@@ -76,6 +80,7 @@ const createState = (): PlanModeState => ({
   planFileName: null,
   toolsBeforeOverview: null,
   statusWidget: null,
+  formatWarned: false,
 });
 
 const isAssistantMessage = (message: AgentMessage): message is AssistantMessage =>
@@ -354,18 +359,35 @@ export const createPlanModeExtension = (
 
     const lastAssistant = event.messages.findLast(isAssistantMessage);
     if (lastAssistant) {
-      const extracted = extractTodoItems(getTextContent(lastAssistant));
-      if (extracted.length > 0) state.todos = extracted;
+      const text = getTextContent(lastAssistant);
+      const extracted = extractTodoItems(text);
+      if (extracted.length > 0) {
+        state.todos = extracted;
+        state.formatWarned = false;
+      } else {
+        // SAFETY: extraction is empty, so planFormatIssue names a problem.
+        const issue = planFormatIssue(text) as string;
+        if (!state.formatWarned) {
+          state.formatWarned = true;
+          ctx.ui.notify("Plan format invalid - asking for a rewrite", "warning");
+          pi.sendMessage(formatCorrectionMessage(issue), {
+            deliverAs: "followUp",
+            triggerTurn: true,
+          });
+          persistState();
+          return;
+        }
+        // A repeat failure only notifies; the corrective turn cannot loop.
+        ctx.ui.notify(issue, "warning");
+      }
     }
 
     persistState();
 
     if (state.phase === "overview") {
-      const choice = await ctx.ui.select("Plan mode - what next?", [
-        "Continue planning",
-        "Write plan to file",
-        "Execute plan",
-      ]);
+      const baseChoices = ["Continue planning", "Write plan to file"];
+      const choices = state.todos.length > 0 ? [...baseChoices, "Execute plan"] : baseChoices;
+      const choice = await ctx.ui.select("Plan mode - what next?", choices);
 
       if (choice === "Write plan to file") {
         await startPlanFile(ctx);
@@ -373,10 +395,7 @@ export const createPlanModeExtension = (
       }
 
       if (choice === "Execute plan") {
-        if (state.todos.length === 0) {
-          ctx.ui.notify("No numbered plan found yet. Continue planning first.", "info");
-          return;
-        }
+        // SAFETY: the Execute plan option only exists when todos exist.
         leaveOverview();
         startExecuting(ctx);
       }

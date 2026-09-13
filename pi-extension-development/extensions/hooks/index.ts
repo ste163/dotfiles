@@ -41,6 +41,8 @@ interface HooksState {
   lastFailure: string | null;
   status: HookStatus | null;
   widget: { invalidate(): void } | null;
+  /** True when the current run ended because the user aborted it. */
+  abortedByUser: boolean;
 }
 
 interface ConfigState {
@@ -63,6 +65,7 @@ const createState = (): HooksState => ({
   lastFailure: null,
   status: null,
   widget: null,
+  abortedByUser: false,
 });
 
 const createConfigState = (): ConfigState => ({ loaded: false, config: null, error: null });
@@ -138,6 +141,7 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
   };
 
   pi.on("session_start", (_event, ctx) => {
+    if (!ctx.isProjectTrusted()) return;
     ensureConfig(ctx.cwd);
     if (configState.error) {
       ctx.ui.notify(configState.error, "warning");
@@ -165,12 +169,28 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
 
   // A failed status stays visible until a later run passes, so an unfixed
   // failure is not silently cleared by the next turn. Running and complete
-  // statuses are transient and clear as before.
+  // statuses are transient and clear as before. A new turn is a fresh run,
+  // so an abort from an earlier turn no longer applies.
   pi.on("turn_start", () => {
+    state.abortedByUser = false;
     if (state.status?.kind !== "failed") updateStatus(state, null);
   });
 
+  pi.on("turn_end", (event) => {
+    const message = event.message;
+    if (message.role === "assistant" && message.stopReason === "aborted")
+      state.abortedByUser = true;
+  });
+
+  pi.on("agent_end", (event) => {
+    const aborted = event.messages.findLast(
+      (message) => message.role === "assistant" && message.stopReason === "aborted",
+    );
+    if (aborted) state.abortedByUser = true;
+  });
+
   pi.on("tool_call", async (event, ctx) => {
+    if (!ctx.isProjectTrusted()) return;
     ensureConfig(ctx.cwd);
     if (configState.error || !configState.config) return;
 
@@ -199,6 +219,11 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    if (!ctx.isProjectTrusted()) return;
+    // A user abort is a hard stop: no hook runs and nothing re-engages the
+    // agent. The signal check also covers aborts before any assistant
+    // message was finalized, which the message check cannot see.
+    if (ctx.signal?.aborted || state.abortedByUser) return;
     ensureConfig(ctx.cwd);
     if (configState.error || !configState.config) return;
 

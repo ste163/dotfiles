@@ -40,6 +40,24 @@ session in overview.
 4. In the plan-file phase the same choice appears, plus `Refine the plan`.
 5. The agent marks each finished step with a `[DONE:n]` tag.
 
+## Plan format
+
+The execute option appears only when a plan parses. The required shape:
+
+```text
+Plan:
+1. First step description
+2. Second step description
+```
+
+- The `Plan` header line accepts markdown forms: `Plan:`, `Plan`,
+  `## Plan`, or `**Plan:**`.
+- Steps are lines that start with a number and a period or a closing
+  paren. Markdown inside a step is stripped.
+- When the last response has no parseable plan, the agent gets one
+  corrective turn that restates the format and the exact problem. The
+  execute option stays hidden until a plan parses.
+
 ## Plan file rules
 
 - The name is asked once when moving to the plan-file phase. It is reused
