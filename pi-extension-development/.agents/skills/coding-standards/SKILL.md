@@ -45,7 +45,23 @@ description: TypeScript coding standards and testing conventions for this projec
   when a union member must forbid a property.
 - **Verbosity in naming** Do not shorten names like Compat for Compatibility. Use full names so it's easier to read.
 - **Do not use mutable data. Use functional programming.** Do not use `let` always use `const`. Use functions to get live data instead of mutations.
-- **Comments should explain concepts and the why not the code.** Code documents. A comment saying a `validate` function validates the passed in item that has type information is a pointless comment. The function's name and it's parameters explain that the function validates the argument. Do not have unnecessary comments.
+- **Comments explain why, never what. Code self-documents.** Names, types,
+  and control flow carry the what on their own. A comment earns its place
+  only when the code cannot carry the meaning. Write comments for business
+  rules the code encodes ("the plan file always lives in cwd"), design
+  constraints ("recursion replaces the loop because the lint rule requires
+  it"), failure semantics ("a bad config must stop the load loudly, never
+  silently drop a model"), and non-obvious invariants ("scan only after
+  the execute marker, so DONE tags from previous plans never leak into the
+  restored list"). Do not write comments that restate the name (a comment
+  saying `validate` validates the argument), explain syntax ("remove
+  bold/italic" above a regex), or narrate the mechanics line by line. If a
+  comment only describes what the next line does, delete the comment or
+  make the code clearer instead. The model for this is
+  `ollama-models/config.ts`: every comment states a rule or a reason. One
+  exception: `SAFETY:` comments on type assertions are required by the
+  project's assertion rule and explain the invariant TypeScript cannot
+  check.
 
 ## Testing
 

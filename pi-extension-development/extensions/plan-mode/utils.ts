@@ -1,10 +1,16 @@
 /**
- * Pure utility functions for plan mode.
+ * Pure utility functions for plan-mode.
  * Extracted for testability.
  */
 
-// Destructive commands blocked in plan mode
+// Destructive commands blocked in plan mode. Best-effort guardrail, not a
+// security boundary: a pattern list can be bypassed, so treat it as one
+// layer of defense, not the only one.
 const DESTRUCTIVE_PATTERNS = [
+  /\bcurl\b/i,
+  /\bwget\b/i,
+  /-delete\b/,
+  /-execdir\b/,
   /\brm\b/i,
   /\brmdir\b/i,
   /\bmv\b/i,
@@ -84,8 +90,6 @@ const SAFE_PATTERNS = [
   /^\s*yarn\s+(list|info|why|audit)/i,
   /^\s*node\s+--version/i,
   /^\s*python\s+--version/i,
-  /^\s*curl\s/i,
-  /^\s*wget\s+-O\s*-/i,
   /^\s*jq\b/,
   /^\s*sed\s+-n/i,
   /^\s*awk\b/,
@@ -101,11 +105,12 @@ export const isSafeCommand = (command: string): boolean => {
   return !isDestructive && isSafe;
 };
 
-// Default name offered when the user doesn't provide one for the plan file.
 export const DEFAULT_PLAN_FILE_NAME = "plan.md";
 
-// Strip any directory parts the user typed - plan file always lives in cwd.
-export const toBaseName = (path: string): string => path.split(/[/\\]/).pop() ?? path;
+// The plan file always lives in the session cwd, so directory parts a user
+// types are discarded rather than honored. split() always yields at least
+// one element, so pop() is defined.
+export const toBaseName = (path: string): string => path.split(/[/\\]/).pop() as string;
 
 export const withMdExt = (name: string): string => (/\.[^./\\]+$/.test(name) ? name : `${name}.md`);
 
@@ -129,9 +134,7 @@ const truncate = (text: string, max: number): string =>
 
 export const cleanStepText = (text: string): string => {
   const stripped = stripLeadingVerb(
-    text
-      .replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1") // Remove bold/italic
-      .replace(/`([^`]+)`/g, "$1"), // Remove code
+    text.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1").replace(/`([^`]+)`/g, "$1"),
   )
     .replace(/\s+/g, " ")
     .trim();
@@ -149,28 +152,41 @@ export const extractTodoItems = (message: string): TodoItem[] => {
   const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
   const numberedPattern = /^\s*(\d+)[.)]\s+\*{0,2}([^*\n]+)/gm;
 
-  return Array.from(planSection.matchAll(numberedPattern)).reduce<TodoItem[]>((items, match) => {
-    const text = (match[2] ?? "")
-      .trim()
-      .replace(/\*{1,2}$/, "")
-      .trim();
-    if (!isPlanStepCandidate(text)) return items;
-
-    const cleaned = cleanStepText(text);
-    if (cleaned.length > 3) items.push({ step: items.length + 1, text: cleaned, completed: false });
-    return items;
-  }, []);
+  return Array.from(planSection.matchAll(numberedPattern))
+    .map((match) =>
+      // SAFETY: the regex requires ([^*\n]+) to match, so group 2 is present.
+      (match[2] as string)
+        .trim()
+        .replace(/\*{1,2}$/, "")
+        .trim(),
+    )
+    .flatMap((text) => (isPlanStepCandidate(text) ? [cleanStepText(text)] : []))
+    .filter((cleaned) => cleaned.length > 3)
+    .map((text, index) => ({ step: index + 1, text, completed: false }));
 };
 
 export const extractDoneSteps = (message: string): number[] =>
-  Array.from(message.matchAll(/\[DONE:(\d+)\]/gi), (match) => Number(match[1])).filter((step) =>
-    Number.isFinite(step),
-  );
+  Array.from(message.matchAll(/\[DONE:(\d+)\]/gi)).flatMap((match) => {
+    const step = Number(match[1]);
+    return Number.isFinite(step) ? [step] : [];
+  });
 
-export const markCompletedSteps = (text: string, items: TodoItem[]): number =>
-  extractDoneSteps(text).reduce((completedCount, step) => {
-    const item = items.find((t) => t.step === step);
-    if (!item) return completedCount;
-    item.completed = true;
-    return completedCount + 1;
-  }, 0);
+/**
+ * Pure: returns a new list, never mutates the input. The count is how many
+ * steps changed, not how many markers matched, so callers only refresh the
+ * UI when something actually flipped.
+ */
+export const markCompletedSteps = (
+  text: string,
+  items: TodoItem[],
+): { todos: TodoItem[]; completed: number } => {
+  const doneSteps = extractDoneSteps(text);
+  const todos = items.map((item) =>
+    doneSteps.includes(item.step) && !item.completed ? { ...item, completed: true } : item,
+  );
+  const completed = todos.reduce(
+    (count, item, index) => (item.completed && !items[index]?.completed ? count + 1 : count),
+    0,
+  );
+  return { todos, completed };
+};

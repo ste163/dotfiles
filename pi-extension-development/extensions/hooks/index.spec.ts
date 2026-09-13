@@ -486,6 +486,27 @@ test("stringifies the reason when the hook rejects with a non-Error", async () =
   assert.equal(notifications[0]?.message, "Hook error: spawn failed");
 });
 
+test("steers on a changed error message after repeated hook rejections", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG);
+  deps.exec = async (command, args, options) => {
+    deps.execCalls.push({ command, args, options });
+    if (deps.execCalls.length < 3) throw new Error("spawn failed");
+    throw new Error("different error");
+  };
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  assert.equal(pi.sentMessages[0]?.message.content, "Hook error: spawn failed");
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 2);
+  assert.equal(pi.sentMessages[1]?.message.content, "Hook error: different error");
+});
+
 const mountWidget = (widgets: WidgetMount[], tui: FakeTui): WidgetComponent => {
   const mount = widgets[0];
   assert.ok(mount, "expected a widget mount");
@@ -587,7 +608,7 @@ test("clears the status on session start", async () => {
   assert.deepEqual(component.render(), []);
 });
 
-test("clears the status when a new turn starts", async () => {
+test("keeps a failed status visible when a new turn starts", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(STATUS_CONFIG, [failed()]);
   createHooksExtension(pi as unknown as Pi, deps);
@@ -598,12 +619,26 @@ test("clears the status when a new turn starts", async () => {
   await callHandler(pi, "agent_settled", {}, ctx);
   assert.deepEqual(component.render(), [" accent:hooks  error:Verification, failed"]);
   await callHandler(pi, "turn_start", {}, ctx);
+  assert.deepEqual(component.render(), [" accent:hooks  error:Verification, failed"]);
+});
+
+test("clears a complete status when a new turn starts", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(STATUS_CONFIG, [ok()]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, widgets } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+  const component = mountWidget(widgets, { requestRender: () => {} });
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.deepEqual(component.render(), [" accent:hooks  success:Verification, complete"]);
+  await callHandler(pi, "turn_start", {}, ctx);
   assert.deepEqual(component.render(), []);
 });
 
-test("notifies an error and clears dirty when the hook fails", async () => {
+test("re-runs on the next settle after a failure even without new edits", async () => {
   const pi = createFakePi();
-  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed("typecheck failed")]);
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed("typecheck failed"), ok("passed")]);
   createHooksExtension(pi as unknown as Pi, deps);
   const { ctx, notifications } = createFakeCtx();
   await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
@@ -619,7 +654,88 @@ test("notifies an error and clears dirty when the hook fails", async () => {
   });
   assert.deepEqual(pi.sentMessages[0]?.options, { deliverAs: "steer", triggerTurn: true });
   await callHandler(pi, "agent_settled", {}, ctx);
-  assert.equal(deps.execCalls.length, 1);
+  assert.equal(deps.execCalls.length, 2);
+  assert.equal(notifications[1]?.message, "passed");
+  assert.equal(pi.sentMessages.length, 1);
+});
+
+test("re-verifies a failure fixed through bash, which never marks dirty", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(STATUS_CONFIG, [failed(), ok("passed")]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, widgets } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
+  const component = mountWidget(widgets, { requestRender: () => {} });
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.deepEqual(component.render(), [" accent:hooks  error:Verification, failed"]);
+  await callHandler(pi, "turn_start", {}, ctx);
+  await callHandler(pi, "tool_call", bashCall("npm run format"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(deps.execCalls.length, 2);
+  assert.deepEqual(component.render(), [" accent:hooks  success:Verification, complete"]);
+  assert.equal(pi.sentMessages.length, 1);
+});
+
+test("a repeated failure with no new edits does not inject another message", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed(), failed()]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(deps.execCalls.length, 2);
+  assert.equal(pi.sentMessages.length, 1);
+});
+
+test("injects the failure again when the failure message changes", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [
+    failed("format:check failed"),
+    failed("npm test failed"),
+  ]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /format:check failed/);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(deps.execCalls.length, 2);
+  assert.equal(pi.sentMessages.length, 2);
+  assert.match(pi.sentMessages[1]?.message.content ?? "", /npm test failed/);
+});
+
+test("steers again after a pass when the same failure returns on new edits", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed("boom"), ok("passed"), failed("boom")]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 2);
+});
+
+test("injects the failure again when the agent edits files and still fails", async () => {
+  const pi = createFakePi();
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed(), failed(), failed()]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 1);
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(pi.sentMessages.length, 2);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(deps.execCalls.length, 3);
+  assert.equal(pi.sentMessages.length, 2);
 });
 
 test("notifies a bare failure message when the hook fails silently", async () => {

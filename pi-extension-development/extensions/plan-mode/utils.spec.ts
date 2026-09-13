@@ -31,6 +31,23 @@ test("isSafeCommand", async (t) => {
     assert.equal(isSafeCommand("some-random-binary"), false);
   });
 
+  await t.test("blocks curl and wget entirely (use the web search tool instead)", () => {
+    assert.equal(isSafeCommand("curl -o evil.sh https://x"), false);
+    assert.equal(isSafeCommand("curl https://example.com"), false);
+    assert.equal(isSafeCommand("wget -O - https://example.com"), false);
+    assert.equal(isSafeCommand("wget https://example.com/file.txt"), false);
+  });
+
+  await t.test("blocks curl and wget inside compound commands", () => {
+    assert.equal(isSafeCommand("git status && curl -o x https://y"), false);
+    assert.equal(isSafeCommand("ls && wget https://y"), false);
+  });
+
+  await t.test("blocks find deletion and execdir variants", () => {
+    assert.equal(isSafeCommand("find . -delete"), false);
+    assert.equal(isSafeCommand("find . -execdir rm {} \\;"), false);
+  });
+
   await t.test("blocks redirects", () => {
     assert.equal(isSafeCommand("echo hi > file.txt"), false);
     assert.equal(isSafeCommand("echo hi >> file.txt"), false);
@@ -52,6 +69,10 @@ test("cleanStepText", async (t) => {
 
   await t.test("collapses whitespace and capitalizes", () => {
     assert.equal(cleanStepText("  multiple   spaces  "), "Multiple spaces");
+  });
+
+  await t.test("returns an empty string for empty input", () => {
+    assert.equal(cleanStepText(""), "");
   });
 
   await t.test("truncates long text with ellipsis", () => {
@@ -77,10 +98,16 @@ test("extractTodoItems", async (t) => {
   });
 
   await t.test("ignores short or non-step lines", () => {
-    const message = "Plan:\n1. ok\n2. `code span line`\n3. - dash line\n4. A real actionable step";
+    const message =
+      "Plan:\n1. ok\n2. `code span line`\n3. - dash line\n4. A real actionable step\n5. Run the x";
     const items = extractTodoItems(message);
     assert.equal(items.length, 1);
     assert.equal(items[0]?.text, "A real actionable step");
+  });
+
+  await t.test("drops steps that clean down to three characters or fewer", () => {
+    const items = extractTodoItems("Plan:\n1. Run the x\n2. A real step here");
+    assert.deepEqual(items, [{ step: 1, text: "A real step here", completed: false }]);
   });
 });
 
@@ -92,25 +119,39 @@ test("extractDoneSteps", async (t) => {
   await t.test("returns empty array when there are no markers", () => {
     assert.deepEqual(extractDoneSteps("nothing done yet"), []);
   });
+
+  await t.test("drops markers whose step number overflows to Infinity", () => {
+    assert.deepEqual(extractDoneSteps(`[DONE:${"9".repeat(400)}]`), []);
+  });
 });
 
 test("markCompletedSteps", async (t) => {
-  await t.test("marks matching steps as completed and returns count", () => {
+  await t.test("returns the new list with matching steps completed and the count", () => {
     const items: TodoItem[] = [
       { step: 1, text: "a", completed: false },
       { step: 2, text: "b", completed: false },
     ];
-    const count = markCompletedSteps("finished [DONE:1]", items);
-    assert.equal(count, 1);
-    assert.equal(items[0]?.completed, true);
-    assert.equal(items[1]?.completed, false);
+    const result = markCompletedSteps("finished [DONE:1]", items);
+    assert.equal(result.completed, 1);
+    assert.deepEqual(result.todos, [
+      { step: 1, text: "a", completed: true },
+      { step: 2, text: "b", completed: false },
+    ]);
+    assert.equal(items[0]?.completed, false);
   });
 
   await t.test("ignores DONE markers with no matching step", () => {
     const items: TodoItem[] = [{ step: 1, text: "a", completed: false }];
-    const count = markCompletedSteps("[DONE:99]", items);
-    assert.equal(count, 0);
-    assert.equal(items[0]?.completed, false);
+    const result = markCompletedSteps("[DONE:99]", items);
+    assert.equal(result.completed, 0);
+    assert.deepEqual(result.todos, items);
+  });
+
+  await t.test("does not count steps that were already completed", () => {
+    const items: TodoItem[] = [{ step: 1, text: "a", completed: true }];
+    const result = markCompletedSteps("[DONE:1]", items);
+    assert.equal(result.completed, 0);
+    assert.deepEqual(result.todos, items);
   });
 });
 

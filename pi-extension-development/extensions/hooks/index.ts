@@ -8,10 +8,13 @@
  *   non-zero exit blocks the tool call with the hook's stdout/stderr as
  *   the reason.
  * - `agent_settled`: the command runs when the agent settles. With
- *   `"when": "dirty"`, it only runs after the session edited or wrote a
- *   file matching one of the configured `paths` patterns. A failure is
- *   injected into the session so the agent sees it; the status widget
- *   clears when the next turn starts.
+ *   `"when": "dirty"`, it runs after the session edited or wrote a file
+ *   matching one of the configured `paths` patterns, and keeps re-running
+ *   on each settle while the last run failed - so a failure fixed through
+ *   bash (which never marks dirty) still gets re-verified. A failure is
+ *   injected into the session on the first failure, again after new edits,
+ *   and again when the failure message changes; the failed status stays
+ *   visible until a run passes.
  *
  * The config loads lazily on the first event, resolved against the session
  * cwd — never `process.cwd()`, which can diverge from it. The policy lives
@@ -34,6 +37,8 @@ import { matchesAny, relativePath, shellQuote } from "./match.ts";
 interface HooksState {
   dirty: boolean;
   running: boolean;
+  failed: boolean;
+  lastFailure: string | null;
   status: HookStatus | null;
   widget: { invalidate(): void } | null;
 }
@@ -54,6 +59,8 @@ interface HookStatus {
 const createState = (): HooksState => ({
   dirty: false,
   running: false,
+  failed: false,
+  lastFailure: null,
   status: null,
   widget: null,
 });
@@ -156,9 +163,12 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       );
   });
 
-  // A stale status (for example a failure fixed through bash, which never
-  // marks dirty) clears when the next turn starts.
-  pi.on("turn_start", () => updateStatus(state, null));
+  // A failed status stays visible until a later run passes, so an unfixed
+  // failure is not silently cleared by the next turn. Running and complete
+  // statuses are transient and clear as before.
+  pi.on("turn_start", () => {
+    if (state.status?.kind !== "failed") updateStatus(state, null);
+  });
 
   pi.on("tool_call", async (event, ctx) => {
     ensureConfig(ctx.cwd);
@@ -194,7 +204,12 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
 
     const hook = configState.config.agent_settled;
     if (!hook) return;
-    if (hook.when === "dirty" && !state.dirty) return;
+
+    // A failed run stays pending until a later run passes, so the next
+    // settle re-runs even without new edits. A failure fixed through bash
+    // (which never marks dirty) is still re-verified this way.
+    const wasFailed = state.failed;
+    if (hook.when === "dirty" && !state.dirty && !wasFailed) return;
     if (state.running) return;
 
     const label = hook.status;
@@ -202,34 +217,47 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
     state.running = true;
     try {
       const result = await runHook(hook.command, "", ctx.cwd, timeoutOf(hook), deps);
+      const dirtyRun = hook.when === "dirty" && state.dirty;
       if (hook.when === "dirty") state.dirty = false;
-      if (label)
-        updateStatus(state, {
-          label,
-          kind: result.killed || result.code !== 0 ? "failed" : "complete",
-        });
 
-      if (result.killed || result.code !== 0) {
+      const failedRun = result.killed || result.code !== 0;
+      state.failed = failedRun;
+      if (label) updateStatus(state, { label, kind: failedRun ? "failed" : "complete" });
+
+      if (failedRun) {
         const failure = describeFailure(result);
         ctx.ui.notify(failure, "error");
-        pi.sendMessage(
-          { customType: "hooks-failure", content: failure, display: true },
-          { deliverAs: "steer", triggerTurn: true },
-        );
+        // Steer the agent on the first failure, when it edited files and
+        // still failed, and when the failure message changed - new output
+        // is new information. A repeated identical failure with no new
+        // changes only refreshes the status, so the loop cannot run forever.
+        if (!wasFailed || dirtyRun || failure !== state.lastFailure) {
+          pi.sendMessage(
+            { customType: "hooks-failure", content: failure, display: true },
+            { deliverAs: "steer", triggerTurn: true },
+          );
+        }
+        state.lastFailure = failure;
       } else {
+        state.lastFailure = null;
         const output = tail(outputOf(result));
         ctx.ui.notify(output === "" ? "Hook passed" : output, "info");
       }
     } catch (error) {
-      // The hook never ran, so the changes stay unverified: dirty survives
-      // and the next settle retries. Only the running flag must always reset.
+      // The hook never ran, so the failure carries the retry obligation:
+      // the next settle re-runs regardless of dirty. Only the running flag
+      // must always reset.
+      state.failed = true;
       if (label) updateStatus(state, { label, kind: "failed" });
       const failure = describeError(error);
       ctx.ui.notify(failure, "error");
-      pi.sendMessage(
-        { customType: "hooks-failure", content: failure, display: true },
-        { deliverAs: "steer", triggerTurn: true },
-      );
+      if (!wasFailed || failure !== state.lastFailure) {
+        pi.sendMessage(
+          { customType: "hooks-failure", content: failure, display: true },
+          { deliverAs: "steer", triggerTurn: true },
+        );
+      }
+      state.lastFailure = failure;
     } finally {
       state.running = false;
     }
