@@ -44,14 +44,14 @@ import {
 
 type Phase = "off" | "overview" | "plan-file" | "executing";
 
-const WRITE_TOOL_NAMES = new Set(["write", "edit"]);
+const WRITE_TOOL_NAMES: readonly string[] = ["write", "edit"];
 
 /** Context messages injected per phase; filtered out of history while off. */
-const CONTEXT_TYPES = new Set([
+const CONTEXT_TYPES: readonly string[] = [
   "plan-mode-overview-context",
   "plan-mode-file-context",
   "plan-mode-execution-context",
-]);
+];
 
 interface PlanModeState {
   phase: Phase;
@@ -117,7 +117,7 @@ export const createPlanModeExtension = (
 
   const enterOverview = (): void => {
     state.toolsBeforeOverview = pi.getActiveTools();
-    pi.setActiveTools(state.toolsBeforeOverview.filter((name) => !WRITE_TOOL_NAMES.has(name)));
+    pi.setActiveTools(state.toolsBeforeOverview.filter((name) => !WRITE_TOOL_NAMES.includes(name)));
   };
 
   const leaveOverview = (): void => {
@@ -284,7 +284,7 @@ export const createPlanModeExtension = (
     return {
       messages: event.messages.filter((m) => {
         const msg = m as AgentMessage & { customType?: string };
-        if (msg.customType !== undefined && CONTEXT_TYPES.has(msg.customType)) return false;
+        if (msg.customType !== undefined && CONTEXT_TYPES.includes(msg.customType)) return false;
         if (msg.role !== "user") return true;
 
         const content = msg.content;

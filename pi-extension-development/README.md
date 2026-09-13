@@ -27,7 +27,7 @@ npm test             # node --test
 
 All four commands must pass cleanly before considering any extension change
 done — see [AGENTS.md](AGENTS.md) for the full mandatory checklist an agent
-must follow, and for the testing-approach rules. 
+must follow, and for the testing-approach rules.
 
 ## Automatic verification
 
