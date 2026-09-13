@@ -96,11 +96,15 @@ const createFakePi = (): FakePi => {
   };
 };
 
+interface StatusWidget {
+  render(): string[];
+}
+
 interface FakeCtx {
   ctx: unknown;
   notifications: { message: string; type?: string }[];
-  statusUpdates: Array<string | undefined>;
-  widgetUpdates: Array<string[] | undefined>;
+  widgetUpdates: Array<string[] | null>;
+  statusWidget: { component: StatusWidget | null; placement: string | null };
   editorConsumed: () => number;
   selectConsumed: () => number;
 }
@@ -116,8 +120,13 @@ const createFakeCtx = (
   const editorResponses = [...(options.editorResponses ?? [])];
   const selectResponses = [...(options.selectResponses ?? [])];
   const notifications: FakeCtx["notifications"] = [];
-  const statusUpdates: FakeCtx["statusUpdates"] = [];
   const widgetUpdates: FakeCtx["widgetUpdates"] = [];
+  const statusWidget: FakeCtx["statusWidget"] = { component: null, placement: null };
+
+  const fakeTheme = {
+    fg: (_color: string, text: string) => text,
+    strikethrough: (text: string) => text,
+  };
 
   const ctx = {
     hasUI: options.hasUI ?? true,
@@ -129,16 +138,19 @@ const createFakeCtx = (
         Promise.resolve(editorResponses.shift() ?? null),
       select: (_prompt: string, _choices: string[]) =>
         Promise.resolve(selectResponses.shift() ?? null),
-      setStatus: (_key: string, value: string | undefined) => {
-        statusUpdates.push(value);
+      setWidget: (
+        _key: string,
+        content: string[] | ((tui: unknown, theme: unknown) => StatusWidget) | undefined,
+        widgetOptions?: { placement?: string },
+      ): void => {
+        if (typeof content === "function") {
+          statusWidget.component = content({ requestRender: () => {} }, fakeTheme);
+          statusWidget.placement = widgetOptions?.placement ?? null;
+          return;
+        }
+        widgetUpdates.push(content ?? null);
       },
-      setWidget: (_key: string, lines: string[] | undefined) => {
-        widgetUpdates.push(lines);
-      },
-      theme: {
-        fg: (_color: string, text: string) => text,
-        strikethrough: (text: string) => text,
-      },
+      theme: fakeTheme,
     },
     sessionManager: {
       getEntries: () => options.entries ?? [],
@@ -148,8 +160,8 @@ const createFakeCtx = (
   return {
     ctx,
     notifications,
-    statusUpdates,
     widgetUpdates,
+    statusWidget,
     editorConsumed: () => (options.editorResponses ?? []).length - editorResponses.length,
     selectConsumed: () => (options.selectResponses ?? []).length - selectResponses.length,
   };
@@ -223,12 +235,13 @@ const lastEntryData = (pi: FakePi): PersistedShape => {
 
 test("toggle on enters overview, filters write/edit tools, notifies, and persists", async () => {
   const { pi } = createExtension();
-  const { ctx, notifications, statusUpdates } = createFakeCtx();
+  const { ctx, notifications, statusWidget } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
 
   await pi.commands["plan"]?.handler(undefined, ctx);
 
   assert.ok(notifications.some((n) => n.message.includes("overview")));
-  assert.equal(statusUpdates.at(-1), "plan: overview");
+  assert.deepEqual(statusWidget.component?.render(), ["plan: overview"]);
   assert.deepEqual(pi.activeTools, ["read", "bash", "grep", "find", "ls"]);
   assert.deepEqual(lastEntryData(pi), {
     phase: "overview",
@@ -239,14 +252,15 @@ test("toggle on enters overview, filters write/edit tools, notifies, and persist
 
 test("toggle off from overview restores the tool snapshot and opens the gate", async () => {
   const { pi } = createExtension();
-  const { ctx, notifications, statusUpdates, widgetUpdates } = createFakeCtx();
+  const { ctx, notifications, statusWidget, widgetUpdates } = createFakeCtx();
+  await callHandler(pi, "session_start", {}, ctx);
 
   await pi.commands["plan"]?.handler(undefined, ctx);
   await pi.commands["plan"]?.handler(undefined, ctx);
 
   assert.ok(notifications.some((n) => n.message.includes("Full access restored")));
-  assert.equal(statusUpdates.at(-1), undefined);
-  assert.equal(widgetUpdates.at(-1), undefined);
+  assert.deepEqual(statusWidget.component?.render(), []);
+  assert.equal(widgetUpdates.at(-1), null);
   assert.deepEqual(pi.activeTools, DEFAULT_ACTIVE_TOOLS);
   const write = await callHandler(
     pi,
@@ -497,7 +511,7 @@ test("sends the complete message and returns to off when all steps are done", as
       planFileName: "plan.md",
     }),
   ];
-  const { ctx, statusUpdates } = createFakeCtx({ entries });
+  const { ctx, statusWidget } = createFakeCtx({ entries });
   await callHandler(pi, "session_start", {}, ctx);
 
   await callHandler(pi, "agent_end", { messages: [] }, ctx);
@@ -506,7 +520,7 @@ test("sends the complete message and returns to off when all steps are done", as
   assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-complete");
   assert.match(pi.sentMessages[0]?.message.content ?? "", /~~a~~/);
   assert.deepEqual(pi.sentMessages[0]?.options, { triggerTurn: false });
-  assert.equal(statusUpdates.at(-1), undefined);
+  assert.deepEqual(statusWidget.component?.render(), []);
   assert.deepEqual(lastEntryData(pi), {
     phase: "off",
     todos: [],
@@ -804,8 +818,10 @@ test("Continue planning keeps the plan-file phase", async () => {
   const entries = [
     customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
   ];
-  const { ctx } = createFakeCtx({ entries, selectResponses: ["Continue planning"] });
+  const { ctx, statusWidget } = createFakeCtx({ entries, selectResponses: ["Continue planning"] });
   await callHandler(pi, "session_start", {}, ctx);
+
+  assert.deepEqual(statusWidget.component?.render(), ["plan: file"]);
 
   await callHandler(
     pi,
@@ -1092,12 +1108,13 @@ test("marks DONE steps at turn end and updates the status widget", async () => {
       planFileName: "plan.md",
     }),
   ];
-  const { ctx, statusUpdates, widgetUpdates } = createFakeCtx({ entries });
+  const { ctx, statusWidget, widgetUpdates } = createFakeCtx({ entries });
   await callHandler(pi, "session_start", {}, ctx);
 
   await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("[DONE:1]")]) }, ctx);
 
-  assert.equal(statusUpdates.at(-1), "plan 1/2");
+  assert.deepEqual(statusWidget.component?.render(), ["plan 1/2"]);
+  assert.equal(statusWidget.placement, "belowEditor");
   assert.deepEqual(widgetUpdates.at(-1), ["[x] a", "[ ] b"]);
   assert.deepEqual(lastEntryData(pi).todos, [
     { step: 1, text: "a", completed: true },
@@ -1203,11 +1220,12 @@ test("restores an executing phase with an empty todo list without rescanning", a
   const entries = [
     customEntry("plan-mode", { phase: "executing", todos: [], planFileName: "plan.md" }),
   ];
-  const { ctx } = createFakeCtx({ entries });
+  const { ctx, statusWidget } = createFakeCtx({ entries });
   await callHandler(pi, "session_start", {}, ctx);
 
   assert.equal(lastEntryData(pi).phase, "executing");
   assert.deepEqual(lastEntryData(pi).todos, []);
+  assert.deepEqual(statusWidget.component?.render(), []);
 });
 
 test("re-scans DONE markers after the execute marker on resume", async () => {

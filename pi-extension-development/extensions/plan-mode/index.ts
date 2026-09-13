@@ -19,6 +19,7 @@ import {
   isToolCallEventType,
   type ExtensionAPI,
   type ExtensionContext,
+  type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { join } from "node:path";
@@ -59,6 +60,8 @@ interface PlanModeState {
   planFileName: string | null;
   /** Active-tool snapshot taken when overview started; never persisted. */
   toolsBeforeOverview: string[] | null;
+  /** Below-editor status widget handle; never persisted. */
+  statusWidget: { invalidate(): void } | null;
 }
 
 interface PersistedState {
@@ -72,6 +75,7 @@ const createState = (): PlanModeState => ({
   todos: [],
   planFileName: null,
   toolsBeforeOverview: null,
+  statusWidget: null,
 });
 
 const isAssistantMessage = (message: AgentMessage): message is AssistantMessage =>
@@ -82,6 +86,16 @@ const getTextContent = (message: AssistantMessage): string =>
 
 const planFileExists = (name: string, deps: PlanModeDeps): boolean =>
   deps.existsSync(join(deps.cwd(), name));
+
+const renderPlanStatus = (state: PlanModeState, theme: Theme): string[] => {
+  if (state.phase === "executing" && state.todos.length > 0) {
+    const completed = state.todos.filter((t) => t.completed).length;
+    return [theme.fg("accent", `plan ${completed}/${state.todos.length}`)];
+  }
+  if (state.phase === "overview") return [theme.fg("warning", "plan: overview")];
+  if (state.phase === "plan-file") return [theme.fg("warning", "plan: file")];
+  return [];
+};
 
 export const createPlanModeExtension = (
   pi: ExtensionAPI,
@@ -129,11 +143,6 @@ export const createPlanModeExtension = (
 
   const updateStatus = (ctx: ExtensionContext): void => {
     if (state.phase === "executing" && state.todos.length > 0) {
-      const completed = state.todos.filter((t) => t.completed).length;
-      ctx.ui.setStatus(
-        "plan-mode",
-        ctx.ui.theme.fg("accent", `plan ${completed}/${state.todos.length}`),
-      );
       const lines = state.todos.map((item) =>
         item.completed
           ? ctx.ui.theme.fg("success", "[x] ") +
@@ -141,16 +150,10 @@ export const createPlanModeExtension = (
           : `${ctx.ui.theme.fg("muted", "[ ] ")}${item.text}`,
       );
       ctx.ui.setWidget("plan-todos", lines);
-    } else if (state.phase === "overview") {
-      ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", "plan: overview"));
-      ctx.ui.setWidget("plan-todos", undefined);
-    } else if (state.phase === "plan-file") {
-      ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", "plan: file"));
-      ctx.ui.setWidget("plan-todos", undefined);
     } else {
-      ctx.ui.setStatus("plan-mode", undefined);
       ctx.ui.setWidget("plan-todos", undefined);
     }
+    state.statusWidget?.invalidate();
   };
 
   const persistState = (): void => {
@@ -396,6 +399,21 @@ export const createPlanModeExtension = (
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    // setStatus texts share one footer line with no key labels, so the plan
+    // status renders in its own widget below the editor, like the hooks one.
+    ctx.ui.setWidget(
+      "plan-status",
+      (tui, theme) => {
+        const component = {
+          render: (): string[] => renderPlanStatus(state, theme),
+          invalidate: (): void => tui.requestRender(),
+        };
+        state.statusWidget = component;
+        return component;
+      },
+      { placement: "belowEditor" },
+    );
+
     if (pi.getFlag("plan") === true) {
       state.phase = "overview";
     }
