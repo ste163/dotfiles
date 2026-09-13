@@ -33,12 +33,30 @@ session in overview.
    numbered plan under a `Plan:` header — in the conversation only.
 3. At the end of the turn, choose one:
    - `Continue planning` — keep discussing.
-   - `Write plan to file` — name the plan file; the agent writes the
-     numbered plan into it. Only that file is writable.
+   - `Write plan to file` — name the plan file. The extension creates it
+     blank on disk, then the agent writes the numbered plan into it.
+     Only that file is writable.
    - `Execute plan` — skip the file; full access returns and the plan is
      executed with progress tracking.
 4. In the plan-file phase the same choice appears, plus `Refine the plan`.
 5. The agent marks each finished step with a `[DONE:n]` tag.
+
+## Paths
+
+```mermaid
+flowchart TD
+    A[Activate plan mode] --> B["Overview: discuss the plan"]
+    B --> D[Execute the plan]
+    B --> C[Write plan to file]
+    C --> E[Refine the plan]
+    E --> C
+    E --> D
+    D --> F[Iterates over Todos until complete]
+```
+
+Overview can execute the plan directly, or write it to a file first. Once
+written, refine the file until it is ready, then execute. The plan is done
+when every step completes.
 
 ## Plan format
 
@@ -63,6 +81,9 @@ Plan:
 - The name is asked once when moving to the plan-file phase. It is reused
   while the file still exists on disk. A name collision with an existing
   file forces a new prompt.
+- The extension creates the plan file blank and the agent populates it.
+  The plan parses from the file, not from the chat message, so Execute
+  and Refine appear only when the file holds a valid plan.
 - Only the basename is kept. Directory parts are stripped, so the file
   always lives in the cwd.
 - The phase persists across sessions. A session that resumes in plan-file

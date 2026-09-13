@@ -24,12 +24,7 @@ Do NOT write or edit any file. Do NOT attempt any change. Wait for the user to c
 export const planFileContextMessage = (planFileName: string): CustomMessage => ({
   customType: "plan-mode-file-context",
   content: `[PLAN MODE ACTIVE - WRITE PLAN FILE]
-You are in the plan-file phase. Write the approved plan as a detailed numbered plan under a "Plan:" header and save it to ${planFileName}.
-
-Plan:
-1. First step description
-2. Second step description
-...
+The plan file ${planFileName} is not written yet. Write the approved plan into it now as a numbered plan under a "Plan:" header. Ask no questions. Stop when the file is written.
 
 The only file you may write or edit is ${planFileName}. Do NOT make other changes.`,
   display: false,
@@ -62,6 +57,21 @@ Use a "Plan:" header line and numbered steps only. Put nothing after the numbere
   display: true,
 });
 
+export const planFileCorrectionMessage = (issue: string, planFileName: string): CustomMessage => ({
+  customType: "plan-mode-plan-format",
+  content: `[PLAN MODE ACTIVE]
+The plan file ${planFileName} has no valid plan: ${issue}.
+
+Write the plan into ${planFileName} in exactly this format:
+
+Plan:
+1. First step description
+2. Second step description
+
+Use a "Plan:" header line and numbered steps only. Put nothing after the numbered steps.`,
+  display: true,
+});
+
 export const todoListMessage = (todos: TodoItem[]): CustomMessage => ({
   customType: "plan-mode-todo-list",
   content: `**Plan Steps (${todos.length}):**\n\n${todos
@@ -70,9 +80,15 @@ export const todoListMessage = (todos: TodoItem[]): CustomMessage => ({
   display: true,
 });
 
-export const writePlanFileMessage = (planFileName: string): CustomMessage => ({
+export const writePlanFileMessage = (planFileName: string, todos: TodoItem[]): CustomMessage => ({
   customType: "plan-mode-write-file",
-  content: `Write the approved plan to ${planFileName} as a numbered plan under a "Plan:" header.`,
+  content: `${planFileName} was created blank on disk. Write the approved plan into it now as a numbered plan under a "Plan:" header. Ask no questions. Stop when the file is written.
+
+${
+  todos.length > 0
+    ? `The approved plan:\n${todos.map((t) => `${t.step}. ${t.text}`).join("\n")}`
+    : "Use the plan discussed in the conversation."
+}`,
   display: true,
 });
 

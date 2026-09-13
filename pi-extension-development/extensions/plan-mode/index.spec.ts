@@ -172,10 +172,32 @@ const createFakeCtx = (
   };
 };
 
-const createFakeDeps = (files: string[]): PlanModeDeps => ({
-  existsSync: (path: string) => files.includes(path),
-  cwd: () => "/virtual/cwd",
-});
+interface FakeDeps extends PlanModeDeps {
+  /** File contents by absolute path; the tests mutate it directly. */
+  store: Record<string, string>;
+}
+
+const createFakeDeps = (
+  files: readonly string[],
+  contents: Record<string, string> = {},
+  options: { writeFails?: boolean } = {},
+): FakeDeps => {
+  const store: Record<string, string> = {
+    ...Object.fromEntries(files.map((file) => [file, ""])),
+    ...contents,
+  };
+  return {
+    store,
+    existsSync: (path: string) => path in store,
+    readFileSync: (path: string) => (path in store ? (store[path] ?? null) : null),
+    writeFileSync: (path: string, content: string) => {
+      if (options.writeFails) return false;
+      store[path] = content;
+      return true;
+    },
+    cwd: () => "/virtual/cwd",
+  };
+};
 
 // Handlers must run in registration order - recursion replaces a loop with
 // await inside, matching pi's real dispatch semantics.
@@ -214,13 +236,15 @@ const userMessage = (content: unknown): unknown => ({ role: "user", content });
 
 const textBlock = (text: string): unknown => ({ type: "text", text });
 
-const createExtension = (files: string[] = []): { pi: FakePi } => {
+const createExtension = (
+  files: readonly string[] = [],
+  contents: Record<string, string> = {},
+  options: { writeFails?: boolean } = {},
+): { pi: FakePi; deps: FakeDeps } => {
   const pi = createFakePi();
-  createPlanModeExtension(
-    pi as unknown as Parameters<typeof createPlanModeExtension>[0],
-    createFakeDeps(files),
-  );
-  return { pi };
+  const deps = createFakeDeps(files, contents, options);
+  createPlanModeExtension(pi as unknown as Parameters<typeof createPlanModeExtension>[0], deps);
+  return { pi, deps };
 };
 
 interface PersistedShape {
@@ -585,8 +609,8 @@ test("Continue planning keeps the overview phase untouched", async () => {
   assert.equal(lastEntryData(pi).phase, "overview");
 });
 
-test("Write plan to file transitions to plan-file, restores tools, and triggers a turn", async () => {
-  const { pi } = createExtension();
+test("Write plan to file creates the file blank, transitions, restores tools, and triggers a turn", async () => {
+  const { pi, deps } = createExtension();
   const { ctx } = createFakeCtx({
     selectResponses: ["Write plan to file"],
     editorResponses: ["my-plan"],
@@ -608,11 +632,13 @@ test("Write plan to file transitions to plan-file, restores tools, and triggers 
   );
 
   assert.deepEqual(pi.activeTools, DEFAULT_ACTIVE_TOOLS);
-  assert.equal(pi.sentMessages.length, 2);
-  assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-todo-list");
-  assert.equal(pi.sentMessages[1]?.message.customType, "plan-mode-write-file");
-  assert.match(pi.sentMessages[1]?.message.content ?? "", /my-plan\.md/);
-  assert.deepEqual(pi.sentMessages[1]?.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.equal(deps.store["/virtual/cwd/my-plan.md"], "");
+  assert.equal(pi.sentMessages.length, 1);
+  assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-write-file");
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /my-plan\.md was created blank/);
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /First step here/);
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /Ask no questions/);
+  assert.deepEqual(pi.sentMessages[0]?.options, { triggerTurn: true, deliverAs: "followUp" });
   assert.deepEqual(lastEntryData(pi), {
     phase: "plan-file",
     todos: [
@@ -621,6 +647,50 @@ test("Write plan to file transitions to plan-file, restores tools, and triggers 
     ],
     planFileName: "my-plan.md",
   });
+});
+
+test("a failed blank-file write notifies and keeps overview", async () => {
+  const { pi } = createExtension([], {}, { writeFails: true });
+  const { ctx, notifications } = createFakeCtx({
+    selectResponses: ["Write plan to file"],
+    editorResponses: ["my-plan"],
+  });
+  await pi.commands["plan"]?.handler(undefined, ctx);
+
+  await callHandler(
+    pi,
+    "agent_end",
+    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    ctx,
+  );
+
+  assert.ok(notifications.some((n) => n.message.includes("Could not create my-plan.md")));
+  assert.equal(pi.sentMessages.length, 0);
+  assert.deepEqual(pi.activeTools, ["read", "bash", "grep", "find", "ls"]);
+  assert.equal(lastEntryData(pi).phase, "overview");
+});
+
+test("Write plan to file without todos creates the file and uses the fallback wording", async () => {
+  const { pi, deps } = createExtension();
+  const { ctx } = createFakeCtx({
+    selectResponses: ["Write plan to file"],
+    editorResponses: ["my-plan"],
+  });
+  await pi.commands["plan"]?.handler(undefined, ctx);
+
+  await callHandler(pi, "agent_end", { messages: [assistantMessage([textBlock("no plan")])] }, ctx);
+  await callHandler(
+    pi,
+    "agent_end",
+    { messages: [assistantMessage([textBlock("still no plan")])] },
+    ctx,
+  );
+
+  assert.equal(deps.store["/virtual/cwd/my-plan.md"], "");
+  assert.equal(pi.sentMessages.length, 2);
+  assert.equal(pi.sentMessages[1]?.message.customType, "plan-mode-write-file");
+  assert.match(pi.sentMessages[1]?.message.content ?? "", /Use the plan discussed/);
+  assert.equal(lastEntryData(pi).phase, "plan-file");
 });
 
 test("Write plan to file is not offered after an unparseable plan response", async () => {
@@ -665,7 +735,7 @@ test("cancelling the name prompt at Write plan to file keeps overview and the to
 });
 
 test("re-prompts on a plan file name collision before transitioning", async () => {
-  const { pi } = createExtension(["/virtual/cwd/taken.md"]);
+  const { pi, deps } = createExtension(["/virtual/cwd/taken.md"]);
   const { ctx } = createFakeCtx({
     selectResponses: ["Write plan to file"],
     editorResponses: ["taken", "free"],
@@ -680,6 +750,7 @@ test("re-prompts on a plan file name collision before transitioning", async () =
   );
 
   assert.equal(lastEntryData(pi).planFileName, "free.md");
+  assert.equal(deps.store["/virtual/cwd/free.md"], "");
 });
 
 test("Execute plan from overview starts execution with full access", async () => {
@@ -878,19 +949,28 @@ test("reuses a locked plan file name without re-prompting on Write plan to file"
 });
 
 // --- agent_end: plan-file phase ---
+// The plan file is the source of truth: the chat message is never
+// consulted, so a reply without a Plan: header cannot trigger a correction.
+
+const planFilePlan = "Plan:\n1. First step here";
+
+const seededPlanFile = (): { pi: FakePi } =>
+  createExtension(["/virtual/cwd/plan.md"], { "/virtual/cwd/plan.md": planFilePlan });
+
+const planFileEntries = (todos: Array<{ step: number; text: string; completed: boolean }> = []) => [
+  customEntry("plan-mode", { phase: "plan-file", todos, planFileName: "plan.md" }),
+];
 
 test("Execute the plan from plan-file starts execution", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
-  ];
+  const { pi } = seededPlanFile();
+  const entries = planFileEntries();
   const { ctx } = createFakeCtx({ entries, selectResponses: ["Execute the plan"] });
   await callHandler(pi, "session_start", {}, ctx);
 
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock("the file is written")])] },
     ctx,
   );
 
@@ -900,10 +980,8 @@ test("Execute the plan from plan-file starts execution", async () => {
 });
 
 test("Continue planning keeps the plan-file phase", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
-  ];
+  const { pi } = seededPlanFile();
+  const entries = planFileEntries();
   const { ctx, statusWidget } = createFakeCtx({ entries, selectResponses: ["Continue planning"] });
   await callHandler(pi, "session_start", {}, ctx);
 
@@ -912,7 +990,7 @@ test("Continue planning keeps the plan-file phase", async () => {
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock("the file is written")])] },
     ctx,
   );
 
@@ -921,10 +999,8 @@ test("Continue planning keeps the plan-file phase", async () => {
 });
 
 test("Refine the plan sends the refinement as a user message", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
-  ];
+  const { pi } = seededPlanFile();
+  const entries = planFileEntries();
   const { ctx } = createFakeCtx({
     entries,
     selectResponses: ["Refine the plan"],
@@ -935,7 +1011,7 @@ test("Refine the plan sends the refinement as a user message", async () => {
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock("the file is written")])] },
     ctx,
   );
 
@@ -947,10 +1023,8 @@ test("Refine the plan sends the refinement as a user message", async () => {
 });
 
 test("an empty refinement sends nothing", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
-  ];
+  const { pi } = seededPlanFile();
+  const entries = planFileEntries();
   const { ctx } = createFakeCtx({
     entries,
     selectResponses: ["Refine the plan"],
@@ -961,7 +1035,7 @@ test("an empty refinement sends nothing", async () => {
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock("the file is written")])] },
     ctx,
   );
 
@@ -970,17 +1044,15 @@ test("an empty refinement sends nothing", async () => {
 });
 
 test("a cancelled select sends nothing and keeps the plan-file phase", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
-  ];
+  const { pi } = seededPlanFile();
+  const entries = planFileEntries();
   const { ctx } = createFakeCtx({ entries, selectResponses: [null] });
   await callHandler(pi, "session_start", {}, ctx);
 
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock("the file is written")])] },
     ctx,
   );
 
@@ -988,11 +1060,9 @@ test("a cancelled select sends nothing and keeps the plan-file phase", async () 
   assert.equal(lastEntryData(pi).phase, "plan-file");
 });
 
-test("plan-file without any todos asks for a format correction instead of prompting", async () => {
+test("a blank plan file asks for a format correction instead of prompting", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
-  ];
+  const entries = planFileEntries();
   const { ctx, selectConsumed } = createFakeCtx({
     entries,
     selectResponses: ["Execute the plan"],
@@ -1002,24 +1072,66 @@ test("plan-file without any todos asks for a format correction instead of prompt
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("no numbered plan here")])] },
+    { messages: [assistantMessage([textBlock("the file is written")])] },
     ctx,
   );
 
   assert.equal(selectConsumed(), 0);
   assert.equal(pi.sentMessages.length, 1);
   assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-plan-format");
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /plan\.md is blank/);
 });
 
-test("keeps old todos and corrects the format when extraction finds none in plan-file", async () => {
+test("a vanished plan file asks for a format correction instead of prompting", async () => {
+  const { pi, deps } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = planFileEntries();
+  const { ctx, selectConsumed } = createFakeCtx({
+    entries,
+    selectResponses: ["Execute the plan"],
+  });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  delete deps.store["/virtual/cwd/plan.md"];
+  await callHandler(
+    pi,
+    "agent_end",
+    { messages: [assistantMessage([textBlock("the file is written")])] },
+    ctx,
+  );
+
+  assert.equal(selectConsumed(), 0);
+  assert.equal(pi.sentMessages.length, 1);
+  assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-plan-format");
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /plan\.md is missing/);
+});
+
+test("an unparseable plan file names the exact format problem", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"], {
+    "/virtual/cwd/plan.md": "no numbered plan here",
+  });
+  const entries = planFileEntries();
+  const { ctx, selectConsumed } = createFakeCtx({
+    entries,
+    selectResponses: ["Execute the plan"],
+  });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(
+    pi,
+    "agent_end",
+    { messages: [assistantMessage([textBlock("the file is written")])] },
+    ctx,
+  );
+
+  assert.equal(selectConsumed(), 0);
+  assert.equal(pi.sentMessages.length, 1);
+  assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-plan-format");
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /missing a 'Plan:' header/);
+});
+
+test("keeps old todos and corrects when the plan file is blank", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", {
-      phase: "plan-file",
-      todos: [{ step: 1, text: "old", completed: false }],
-      planFileName: "plan.md",
-    }),
-  ];
+  const entries = planFileEntries([{ step: 1, text: "old", completed: false }]);
   const { ctx, selectConsumed } = createFakeCtx({
     entries,
     selectResponses: ["Continue planning"],
@@ -1029,7 +1141,7 @@ test("keeps old todos and corrects the format when extraction finds none in plan
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("no plan here")])] },
+    { messages: [assistantMessage([textBlock("the file is written")])] },
     ctx,
   );
 
@@ -1041,9 +1153,7 @@ test("keeps old todos and corrects the format when extraction finds none in plan
 
 test("a repeated format failure in plan-file with no todos returns without prompting", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
-  ];
+  const entries = planFileEntries();
   const { ctx, selectConsumed, notifications } = createFakeCtx({
     entries,
     selectResponses: ["Execute the plan"],
@@ -1053,13 +1163,13 @@ test("a repeated format failure in plan-file with no todos returns without promp
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("no plan here")])] },
+    { messages: [assistantMessage([textBlock("the file is still blank")])] },
     ctx,
   );
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("still no plan here")])] },
+    { messages: [assistantMessage([textBlock("still blank")])] },
     ctx,
   );
 
@@ -1097,6 +1207,35 @@ test("injects the plan-file context while in plan-file", async () => {
   };
   assert.equal(result.message.customType, "plan-mode-file-context");
   assert.match(result.message.content, /only file you may write or edit is plan\.md/);
+});
+
+test("injects nothing once the plan file parses", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"], {
+    "/virtual/cwd/plan.md": "Plan:\n1. First step here",
+  });
+  const entries = [
+    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  assert.equal(await callHandler(pi, "before_agent_start", {}, ctx), undefined);
+});
+
+test("injects the write context when the plan file is missing", async () => {
+  const { pi, deps } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  delete deps.store["/virtual/cwd/plan.md"];
+  const result = (await callHandler(pi, "before_agent_start", {}, ctx)) as {
+    message: { customType: string; content: string };
+  };
+  assert.equal(result.message.customType, "plan-mode-file-context");
+  assert.match(result.message.content, /plan\.md is not written yet/);
 });
 
 test("injects the execution context while executing with unfinished steps only", async () => {

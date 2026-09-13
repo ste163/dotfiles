@@ -31,6 +31,7 @@ import {
   formatCorrectionMessage,
   overviewContextMessage,
   planFileContextMessage,
+  planFileCorrectionMessage,
   todoListMessage,
   writePlanFileMessage,
 } from "./messages.ts";
@@ -92,6 +93,25 @@ const getTextContent = (message: AssistantMessage): string =>
 const planFileExists = (name: string, deps: PlanModeDeps): boolean =>
   deps.existsSync(join(deps.cwd(), name));
 
+// The plan file is the source of truth in the plan-file phase: the agent
+// writes the plan into it, and every read back uses the file, never the
+// chat message that announced the write.
+const planFileContent = (state: PlanModeState, deps: PlanModeDeps): string | null => {
+  // SAFETY: callers only run in plan-file phase, which locks the name.
+  const lockedName = state.planFileName as string;
+  return deps.readFileSync(join(deps.cwd(), lockedName));
+};
+
+const planFileIssue = (state: PlanModeState, content: string | null): string => {
+  // SAFETY: the plan-file phase guarantees a locked plan file name.
+  const lockedName = state.planFileName as string;
+  if (content === null) return `${lockedName} is missing`;
+  if (content.trim() === "") return `${lockedName} is blank`;
+  // SAFETY: non-empty content that extracted nothing, so planFormatIssue
+  // names the exact problem instead of returning null.
+  return planFormatIssue(content) as string;
+};
+
 // The status line mirrors the hooks widget's frame - accent label, two
 // spaces, colored state - so the below-editor statuses share one format.
 const planStatusLine = (theme: Theme, color: "accent" | "warning", text: string): string =>
@@ -109,7 +129,7 @@ const renderPlanStatus = (state: PlanModeState, theme: Theme): string[] => {
 
 export const createPlanModeExtension = (
   pi: ExtensionAPI,
-  deps: PlanModeDeps = defaultDeps,
+  deps: PlanModeDeps = defaultDeps(),
 ): void => {
   const state = createState();
 
@@ -201,6 +221,19 @@ export const createPlanModeExtension = (
       state.planFileName = chosen;
     }
 
+    // SAFETY: the name lock above guarantees a non-null plan file name.
+    const lockedName = state.planFileName as string;
+
+    // The extension creates the file blank; the model only populates it.
+    // The blank file is the success signal the agent writes after, so the
+    // model never has to decide whether to create the file itself.
+    if (!planFileExists(lockedName, deps)) {
+      if (!deps.writeFileSync(join(deps.cwd(), lockedName), "")) {
+        ctx.ui.notify(`Could not create ${lockedName}. Write to file was cancelled.`, "error");
+        return false;
+      }
+    }
+
     // No-op unless coming from overview: only overview filters the tools.
     leaveOverview();
 
@@ -208,12 +241,7 @@ export const createPlanModeExtension = (
     updateStatus(ctx);
     persistState();
 
-    // SAFETY: the name lock above guarantees a non-null plan file name.
-    const lockedName = state.planFileName as string;
-    if (state.todos.length > 0) {
-      pi.sendMessage(todoListMessage(state.todos), { deliverAs: "followUp" });
-    }
-    pi.sendMessage(writePlanFileMessage(lockedName), {
+    pi.sendMessage(writePlanFileMessage(lockedName, state.todos), {
       triggerTurn: true,
       deliverAs: "followUp",
     });
@@ -320,8 +348,15 @@ export const createPlanModeExtension = (
     }
 
     if (state.phase === "plan-file") {
-      // SAFETY: the plan-file phase guarantees a locked plan file name.
-      return { message: planFileContextMessage(state.planFileName as string) };
+      // The write instruction repeats only while the file has no plan, so
+      // a written plan does not leave a stale instruction in later turns.
+      const content = planFileContent(state, deps);
+      const extracted = content === null ? [] : extractTodoItems(content);
+      if (extracted.length === 0) {
+        // SAFETY: the plan-file phase guarantees a locked plan file name.
+        return { message: planFileContextMessage(state.planFileName as string) };
+      }
+      return;
     }
 
     if (state.phase === "executing" && state.todos.length > 0) {
@@ -357,6 +392,55 @@ export const createPlanModeExtension = (
 
     if ((state.phase !== "overview" && state.phase !== "plan-file") || !ctx.hasUI) return;
 
+    // plan-file phase: the plan file is the source of truth. The chat
+    // message is not consulted - the agent writes the plan into the file,
+    // so its reply can be anything without triggering a correction.
+    if (state.phase === "plan-file") {
+      const content = planFileContent(state, deps);
+      const extracted = content === null ? [] : extractTodoItems(content);
+      if (extracted.length > 0) {
+        state.todos = extracted;
+        state.formatWarned = false;
+      } else {
+        const issue = planFileIssue(state, content);
+        if (!state.formatWarned) {
+          state.formatWarned = true;
+          ctx.ui.notify("Plan file invalid - asking for a rewrite", "warning");
+          // SAFETY: the plan-file phase guarantees a locked plan file name.
+          pi.sendMessage(planFileCorrectionMessage(issue, state.planFileName as string), {
+            deliverAs: "followUp",
+            triggerTurn: true,
+          });
+          persistState();
+          return;
+        }
+        // A repeat failure only notifies; the corrective turn cannot loop.
+        ctx.ui.notify(issue, "warning");
+      }
+
+      persistState();
+
+      if (state.todos.length === 0) return;
+
+      const choice = await ctx.ui.select("Plan mode - what next?", [
+        "Execute the plan",
+        "Continue planning",
+        "Refine the plan",
+      ]);
+
+      if (choice === "Execute the plan") {
+        startExecuting(ctx);
+      } else if (choice === "Refine the plan") {
+        const refinement = await ctx.ui.editor("Refine the plan:", "");
+        if (refinement?.trim()) {
+          pi.sendMessage(todoListMessage(state.todos), { deliverAs: "followUp" });
+          pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
+        }
+      }
+      return;
+    }
+
+    // overview phase: extraction reads the assistant message.
     const lastAssistant = event.messages.findLast(isAssistantMessage);
     if (lastAssistant) {
       const text = getTextContent(lastAssistant);
@@ -384,41 +468,19 @@ export const createPlanModeExtension = (
 
     persistState();
 
-    if (state.phase === "overview") {
-      const baseChoices = ["Continue planning", "Write plan to file"];
-      const choices = state.todos.length > 0 ? [...baseChoices, "Execute plan"] : baseChoices;
-      const choice = await ctx.ui.select("Plan mode - what next?", choices);
+    const baseChoices = ["Continue planning", "Write plan to file"];
+    const choices = state.todos.length > 0 ? [...baseChoices, "Execute plan"] : baseChoices;
+    const choice = await ctx.ui.select("Plan mode - what next?", choices);
 
-      if (choice === "Write plan to file") {
-        await startPlanFile(ctx);
-        return;
-      }
-
-      if (choice === "Execute plan") {
-        // SAFETY: the Execute plan option only exists when todos exist.
-        leaveOverview();
-        startExecuting(ctx);
-      }
+    if (choice === "Write plan to file") {
+      await startPlanFile(ctx);
       return;
     }
 
-    // plan-file phase: execution needs an extracted numbered plan.
-    if (state.todos.length === 0) return;
-
-    const choice = await ctx.ui.select("Plan mode - what next?", [
-      "Execute the plan",
-      "Continue planning",
-      "Refine the plan",
-    ]);
-
-    if (choice === "Execute the plan") {
+    if (choice === "Execute plan") {
+      // SAFETY: the Execute plan option only exists when todos exist.
+      leaveOverview();
       startExecuting(ctx);
-    } else if (choice === "Refine the plan") {
-      const refinement = await ctx.ui.editor("Refine the plan:", "");
-      if (refinement?.trim()) {
-        pi.sendMessage(todoListMessage(state.todos), { deliverAs: "followUp" });
-        pi.sendUserMessage(refinement.trim(), { deliverAs: "followUp" });
-      }
     }
   });
 
