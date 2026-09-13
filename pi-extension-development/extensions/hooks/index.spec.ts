@@ -887,6 +887,33 @@ test("combines stdout and stderr in failure notifications", async () => {
   assert.ok(notifications[0]?.message.includes("out\nerr"));
 });
 
+test("keeps the long tail in the steered failure while the notify stays short", async () => {
+  const pi = createFakePi();
+  const output = "a".repeat(500) + "b".repeat(500);
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed(output)]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(notifications[0]?.message, `Hook failed (exit 1): ${"b".repeat(300)}`);
+  assert.equal(
+    pi.sentMessages[0]?.message.content,
+    `Hook failed (exit 1): ${"a".repeat(500)}${"b".repeat(500)}`,
+  );
+});
+
+test("caps the steered failure tail at 10,000 characters", async () => {
+  const pi = createFakePi();
+  const output = "a".repeat(11_000);
+  const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [failed(output)]);
+  createHooksExtension(pi as unknown as Pi, deps);
+  const { ctx, notifications } = createFakeCtx();
+  await callHandler(pi, "tool_call", editCall("src/x.ts"), ctx);
+  await callHandler(pi, "agent_settled", {}, ctx);
+  assert.equal(notifications[0]?.message, `Hook failed (exit 1): ${"a".repeat(300)}`);
+  assert.equal(pi.sentMessages[0]?.message.content, `Hook failed (exit 1): ${"a".repeat(10_000)}`);
+});
+
 test("notifies stderr output when the hook succeeds with warnings", async () => {
   const pi = createFakePi();
   const deps = createFakeDeps(SETTLED_ONLY_CONFIG, [

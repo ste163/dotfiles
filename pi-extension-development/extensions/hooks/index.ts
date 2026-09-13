@@ -91,6 +91,9 @@ const tail = (text: string, max = 300): string => {
   return trimmed.length <= max ? trimmed : trimmed.slice(-max);
 };
 
+/** The steered failure message keeps enough tail to include diffs and coverage reports. */
+const FAILURE_MESSAGE_MAX = 10_000;
+
 /** Combined hook output: stdout and stderr, whichever the hook wrote to. */
 const outputOf = (result: ExecResult): string => {
   const stdout = result.stdout.trim();
@@ -100,9 +103,9 @@ const outputOf = (result: ExecResult): string => {
   return `${stdout}\n${stderr}`;
 };
 
-const describeFailure = (result: ExecResult): string => {
+const describeFailure = (result: ExecResult, max = 300): string => {
   const prefix = result.killed ? "Hook timed out" : `Hook failed (exit ${result.code})`;
-  const output = tail(outputOf(result));
+  const output = tail(outputOf(result), max);
   return output === "" ? prefix : `${prefix}: ${output}`;
 };
 
@@ -252,17 +255,20 @@ export const createHooksExtension = (pi: ExtensionAPI, deps: HooksDeps = default
       if (failedRun) {
         const failure = describeFailure(result);
         ctx.ui.notify(failure, "error");
+        // The toast keeps a short tail; the steered message keeps a long
+        // one, so diffs and the coverage report reach the agent in one turn.
+        const steered = describeFailure(result, FAILURE_MESSAGE_MAX);
         // Steer the agent on the first failure, when it edited files and
         // still failed, and when the failure message changed - new output
         // is new information. A repeated identical failure with no new
         // changes only refreshes the status, so the loop cannot run forever.
-        if (!wasFailed || dirtyRun || failure !== state.lastFailure) {
+        if (!wasFailed || dirtyRun || steered !== state.lastFailure) {
           pi.sendMessage(
-            { customType: "hooks-failure", content: failure, display: true },
+            { customType: "hooks-failure", content: steered, display: true },
             { deliverAs: "steer", triggerTurn: true },
           );
         }
-        state.lastFailure = failure;
+        state.lastFailure = steered;
       } else {
         state.lastFailure = null;
         const output = tail(outputOf(result));

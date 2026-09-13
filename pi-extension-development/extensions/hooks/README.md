@@ -63,7 +63,9 @@ stderr become the reason, truncated to 300 characters.
 A failure shows a notification with the hook output, truncated to 300
 characters. It does not block the session. The failure is also injected
 into the session, so the agent sees the output and starts a turn to fix
-it. The failed status stays visible until a later run passes. While the
+it. The injected copy keeps the last 10,000 characters, so failure
+details and the coverage report survive; the notification keeps the
+short tail. The failed status stays visible until a later run passes. While the
 last run failed, every settle re-runs the hook - even without new edits,
 so a failure fixed through bash still gets re-verified. The failure
 message is injected on the first failure, again when the agent edits
