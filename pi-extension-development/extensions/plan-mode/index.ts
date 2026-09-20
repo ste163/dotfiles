@@ -28,6 +28,7 @@ import {
   completeMessage,
   executionContextMessage,
   executeMessage,
+  executeText,
   formatCorrectionMessage,
   overviewContextMessage,
   planFileContextMessage,
@@ -216,10 +217,11 @@ export const createPlanModeExtension = (
     persistState();
 
     pi.sendMessage(todoListMessage(state.todos), { deliverAs: "followUp" });
-    pi.sendMessage(executeMessage(state.todos, first), {
-      triggerTurn: true,
-      deliverAs: "followUp",
-    });
+    pi.sendMessage(executeMessage(state.todos, first), { deliverAs: "followUp" });
+    // The user message is the real turn trigger. Queued as a follow-up, it
+    // reaches the model through the post-run continuation, which never gets
+    // the before_agent_start injection.
+    pi.sendUserMessage(executeText(state.todos, first), { deliverAs: "followUp" });
   };
 
   /**

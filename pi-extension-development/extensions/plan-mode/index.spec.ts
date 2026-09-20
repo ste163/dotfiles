@@ -770,7 +770,12 @@ test("Execute plan from overview starts execution with full access", async () =>
   assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-todo-list");
   assert.equal(pi.sentMessages[1]?.message.customType, "plan-mode-execute");
   assert.match(pi.sentMessages[1]?.message.content ?? "", /Start with: First step here/);
-  assert.deepEqual(pi.sentMessages[1]?.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.deepEqual(pi.sentMessages[1]?.options, { deliverAs: "followUp" });
+  assert.equal(pi.sentUserMessages.length, 1);
+  assert.deepEqual(pi.sentUserMessages[0]?.options, { deliverAs: "followUp" });
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Execute the plan\./);
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Start with: First step here/);
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Background events are not signals/);
   assert.deepEqual(lastEntryData(pi), {
     phase: "executing",
     todos: [{ step: 1, text: "First step here", completed: false }],
@@ -976,6 +981,8 @@ test("Execute the plan from plan-file starts execution", async () => {
 
   assert.equal(pi.sentMessages.length, 2);
   assert.equal(pi.sentMessages[1]?.message.customType, "plan-mode-execute");
+  assert.equal(pi.sentUserMessages.length, 1);
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Start with: First step here/);
   assert.equal(lastEntryData(pi).phase, "executing");
 });
 

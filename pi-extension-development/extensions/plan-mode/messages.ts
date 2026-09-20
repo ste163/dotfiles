@@ -97,6 +97,19 @@ ${
   display: true,
 });
 
+export const executeText = (todos: TodoItem[], first: string): string =>
+  `Execute the plan.
+
+Remaining steps:
+${todos.map((t) => `${t.step}. ${t.text}`).join("\n")}
+
+Start with: ${first}
+
+Step rules:
+- A step is complete only when its signal arrived in this turn: a tool result, a command output, or a user message. Background events are not signals.
+- Mark exactly one [DONE:n] tag per step, in the same turn that completes it.
+- Never batch tags, never pre-claim a step, never tag in a later turn.`;
+
 export const executeMessage = (todos: TodoItem[], first: string): CustomMessage => ({
   customType: "plan-mode-execute",
   content: `Execute the plan.
