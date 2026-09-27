@@ -10,6 +10,8 @@ export interface CodebaseMemoryMcpEnforcerDeps {
   statSync(path: string): { mtimeMs: number; isFile: boolean };
   cwd(): string;
   homeDir(): string;
+  /** Environment lookup; answers null for unset variables. */
+  env(name: string): string | null;
 }
 
 /** Default deps: the real filesystem. A plain immutable value. */
@@ -22,4 +24,5 @@ export const defaultDeps: CodebaseMemoryMcpEnforcerDeps = {
   },
   cwd: () => process.cwd(),
   homeDir: () => homedir(),
+  env: (name) => process.env[name] ?? null,
 };

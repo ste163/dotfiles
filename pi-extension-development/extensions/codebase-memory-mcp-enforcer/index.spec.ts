@@ -28,7 +28,7 @@ const createFakePi = (): FakePi => {
   };
 };
 
-const CONFIG_PATH = "/virtual/home/.pi/agent/mcp.json";
+const CONFIG_PATH = "/virtual/home/.pi/agent/mcp-adapter.json";
 const DB_PATH = "/virtual/home/.cache/codebase-memory-mcp/virtual-repo.db";
 const REGISTERED_MCP =
   '{"mcpServers":{"codebase-memory-mcp":{"command":"codebase-memory-mcp","lifecycle":"eager"}}}';
@@ -42,12 +42,14 @@ const createFakeDeps = (
   files: Record<string, string> = {},
   homeDir = "/virtual/home",
   stats: Record<string, { mtimeMs: number; isFile: boolean }> = {},
+  env: Record<string, string | null> = {},
 ): CodebaseMemoryMcpEnforcerDeps => ({
   existsSync: (path) => existingPaths.includes(path),
   readFile: (path) => files[path] ?? "",
   statSync: (path) => stats[path] ?? { mtimeMs: 0, isFile: true },
   cwd: () => cwd,
   homeDir: () => homeDir,
+  env: (name) => env[name] ?? null,
 });
 
 // Handlers must run in registration order — later ones can observe mutations
@@ -165,7 +167,7 @@ test("blocks with the index-first path when the server is registered but the rep
   assert.ok(!reason.includes("Not connected?"));
 });
 
-test("treats a malformed or wrong-shaped mcp.json as not registered, even with a db present", async () => {
+test("treats a malformed or wrong-shaped adapter config as not registered, even with a db present", async () => {
   const configs = [
     "not json",
     "42",
@@ -187,6 +189,67 @@ test("treats a malformed or wrong-shaped mcp.json as not registered, even with a
   for (const { config, reason } of results) {
     assert.ok(reason.includes("1. Not connected?"), config);
   }
+});
+
+test("registers from each adapter config source", async () => {
+  const sources = [
+    "/virtual/home/.config/mcp/mcp.json",
+    "/virtual/home/.agents/mcp.json",
+    "/virtual/home/.agents/mcp/mcp.json",
+    CONFIG_PATH,
+    "/virtual/repo/.mcp.json",
+    "/virtual/repo/.pi/mcp-adapter.json",
+  ];
+  const results = await Promise.all(
+    sources.map(async (source) => {
+      const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, source], "/virtual/repo", {
+        [source]: REGISTERED_MCP,
+      });
+      return { source, reason: await blocked("rg foo", deps) };
+    }),
+  );
+  for (const { source, reason } of results) {
+    assert.ok(reason.includes("Try instead:"), source);
+  }
+});
+
+test("ignores Pi's own mcp.json files, which the adapter no longer reads", async () => {
+  const legacyPaths = ["/virtual/home/.pi/agent/mcp.json", "/virtual/repo/.pi/mcp.json"];
+  const results = await Promise.all(
+    legacyPaths.map(async (legacyPath) => {
+      const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, legacyPath], "/virtual/repo", {
+        [legacyPath]: REGISTERED_MCP,
+      });
+      return { legacyPath, reason: await blocked("rg foo", deps) };
+    }),
+  );
+  for (const { legacyPath, reason } of results) {
+    assert.ok(reason.includes("1. Not connected?"), legacyPath);
+  }
+});
+
+test("honors PI_CODING_AGENT_DIR and ignores the default agent dir when set", async () => {
+  const customConfig = "/custom/agent/mcp-adapter.json";
+  const customDeps = createFakeDeps(
+    ["/virtual/repo/.git", DB_PATH, customConfig],
+    "/virtual/repo",
+    { [customConfig]: REGISTERED_MCP },
+    "/virtual/home",
+    {},
+    { PI_CODING_AGENT_DIR: "/custom/agent" },
+  );
+  const customReason = await blocked("rg foo", customDeps);
+  assert.ok(customReason.includes("Try instead:"));
+  const defaultOnlyDeps = createFakeDeps(
+    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH],
+    "/virtual/repo",
+    { [CONFIG_PATH]: REGISTERED_MCP },
+    "/virtual/home",
+    {},
+    { PI_CODING_AGENT_DIR: "/custom/agent" },
+  );
+  const defaultOnlyReason = await blocked("rg foo", defaultOnlyDeps);
+  assert.ok(defaultOnlyReason.includes("1. Not connected?"));
 });
 
 test("blocks every violating segment of a chain and names them all", async () => {
@@ -613,6 +676,7 @@ test("default deps read the real filesystem", () => {
   const dotStats = defaultDeps.statSync(".");
   assert.equal(dotStats.isFile, false);
   assert.equal(typeof dotStats.mtimeMs, "number");
+  assert.equal(defaultDeps.env("__pi_codebase_memory_enforcer_test_unset__"), null);
 });
 
 test("prepends the READY reminder with the decision rule when indexed", async () => {

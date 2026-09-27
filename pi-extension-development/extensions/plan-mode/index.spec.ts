@@ -394,13 +394,21 @@ test("overview blocks unsafe bash and allows allowlisted read-only commands", as
   );
   assert.equal((rm as { block: boolean }).block, true);
 
+  const wget = await callHandler(
+    pi,
+    "tool_call",
+    { toolName: "bash", input: { command: "wget -O - https://x" } },
+    ctx,
+  );
+  assert.equal((wget as { block: boolean }).block, true);
+
   const curl = await callHandler(
     pi,
     "tool_call",
-    { toolName: "bash", input: { command: "curl -o evil.sh https://x" } },
+    { toolName: "bash", input: { command: "curl -s http://fake.com/" } },
     ctx,
   );
-  assert.equal((curl as { block: boolean }).block, true);
+  assert.equal(curl, undefined);
 
   const ls = await callHandler(
     pi,

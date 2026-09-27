@@ -32,15 +32,15 @@ test("isSafeCommand", async (t) => {
     assert.equal(isSafeCommand("some-random-binary"), false);
   });
 
-  await t.test("blocks curl and wget entirely (use the web search tool instead)", () => {
-    assert.equal(isSafeCommand("curl -o evil.sh https://x"), false);
-    assert.equal(isSafeCommand("curl https://example.com"), false);
+  await t.test("allows curl and still blocks wget", () => {
+    assert.equal(isSafeCommand("curl https://example.com"), true);
+    assert.equal(isSafeCommand("curl -s http://localhost:11434/api/version"), true);
     assert.equal(isSafeCommand("wget -O - https://example.com"), false);
     assert.equal(isSafeCommand("wget https://example.com/file.txt"), false);
   });
 
-  await t.test("blocks curl and wget inside compound commands", () => {
-    assert.equal(isSafeCommand("git status && curl -o x https://y"), false);
+  await t.test("allows curl inside compound commands but still blocks wget", () => {
+    assert.equal(isSafeCommand("git status && curl -s https://y"), true);
     assert.equal(isSafeCommand("ls && wget https://y"), false);
   });
 

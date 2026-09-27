@@ -7,7 +7,6 @@
 // security boundary: a pattern list can be bypassed, so treat it as one
 // layer of defense, not the only one.
 const DESTRUCTIVE_PATTERNS = [
-  /\bcurl\b/i,
   /\bwget\b/i,
   /-delete\b/,
   /-execdir\b/,
@@ -46,7 +45,8 @@ const DESTRUCTIVE_PATTERNS = [
   /\b(vim?|nano|emacs|code|subl)\b/i,
 ];
 
-// Safe read-only commands allowed in plan mode
+// Commands allowed in plan mode. curl is allowed for probing local services;
+// wget stays in the destructive list. The guardrail is best-effort.
 const SAFE_PATTERNS = [
   /^\s*cat\b/,
   /^\s*head\b/,
@@ -58,6 +58,7 @@ const SAFE_PATTERNS = [
   /^\s*ls\b/,
   /^\s*pwd\b/,
   /^\s*cd\b/,
+  /^\s*curl\b/,
   /^\s*echo\b/,
   /^\s*printf\b/,
   /^\s*wc\b/,

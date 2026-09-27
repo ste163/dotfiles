@@ -128,10 +128,11 @@ What is covered:
   set during overview. During plan-file they are gated to one file by
   basename comparison.
 - The `bash` tool passes a read-only guardrail during overview and
-  plan-file: the command must start with an allowlisted read-only command
-  and must not match a destructive pattern (`rm`, `sudo`, redirects,
-  `curl`, `wget`, `find -delete`, and so on). `curl` and `wget` are never
-  allowed; use the `web_search` and `web_fetch` tools for web research.
+  plan-file: the command must start with an allowlisted command and must
+  not match a destructive pattern (`rm`, `sudo`, redirects, `wget`,
+  `find -delete`, and so on). `curl` is allowed for probing local
+  services; `wget` stays blocked. Use the `web_search` and `web_fetch`
+  tools for web research.
 
 What is not covered:
 

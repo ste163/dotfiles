@@ -3,6 +3,11 @@
  * repo. The server names projects by dashing the repo root, so the project
  * name and its db file are derivable without touching the server. A naming
  * mismatch just yields "not indexed" — the safe fallback.
+ *
+ * Registration is read from the pi-mcp-adapter config sources (v3 layout):
+ * the user-global shared files, the adapter config in the Pi agent dir,
+ * and the project files. Pi's own mcp.json files belong to Pi's built-in
+ * MCP support, not the adapter, so they are ignored here.
  */
 
 import { join } from "node:path";
@@ -11,10 +16,26 @@ import type { CodebaseMemoryMcpEnforcerDeps } from "./deps.ts";
 export const projectNameFor = (gitRoot: string): string =>
   gitRoot.split("/").filter(Boolean).join("-");
 
-const mcpConfigPath = (homeDir: string): string => join(homeDir, ".pi/agent/mcp.json");
-
 const projectDbPath = (homeDir: string, gitRoot: string): string =>
   join(homeDir, ".cache/codebase-memory-mcp", projectNameFor(gitRoot) + ".db");
+
+/** The Pi agent dir: PI_CODING_AGENT_DIR wins, else ~/.pi/agent. */
+const agentDirPath = (deps: CodebaseMemoryMcpEnforcerDeps): string =>
+  deps.env("PI_CODING_AGENT_DIR") ?? join(deps.homeDir(), ".pi/agent");
+
+/**
+ * The adapter's normal config sources, in the adapter's precedence order
+ * (later entries win). The enforcer only needs membership, so the order
+ * is irrelevant here.
+ */
+const configSourcePaths = (deps: CodebaseMemoryMcpEnforcerDeps): readonly string[] => [
+  join(deps.homeDir(), ".config/mcp/mcp.json"),
+  join(deps.homeDir(), ".agents/mcp.json"),
+  join(deps.homeDir(), ".agents/mcp/mcp.json"),
+  join(agentDirPath(deps), "mcp-adapter.json"),
+  join(deps.cwd(), ".mcp.json"),
+  join(deps.cwd(), ".pi/mcp-adapter.json"),
+];
 
 const parseJson = (raw: string): unknown | null => {
   try {
@@ -24,7 +45,7 @@ const parseJson = (raw: string): unknown | null => {
   }
 };
 
-/** mcp.json registers the server; its presence is the cheapest connected signal. */
+/** A parsed config registers the server when its mcpServers object holds the name. */
 const isServerRegistered = (parsed: unknown): boolean => {
   if (typeof parsed !== "object" || parsed === null) return false;
   const servers = (parsed as Record<string, unknown>)["mcpServers"];
@@ -39,9 +60,9 @@ export interface McpState {
 }
 
 export const mcpState = (gitRoot: string, deps: CodebaseMemoryMcpEnforcerDeps): McpState => {
-  const configPath = mcpConfigPath(deps.homeDir());
-  const registered =
-    deps.existsSync(configPath) && isServerRegistered(parseJson(deps.readFile(configPath)));
+  const registered = configSourcePaths(deps).some(
+    (path) => deps.existsSync(path) && isServerRegistered(parseJson(deps.readFile(path))),
+  );
   return { registered, indexed: deps.existsSync(projectDbPath(deps.homeDir(), gitRoot)) };
 };
 
