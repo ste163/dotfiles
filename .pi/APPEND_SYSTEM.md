@@ -33,9 +33,9 @@ When you list a directory, use `ls -A` or `ls -la`. Plain `ls` and glob
 expansion hide dotfiles, and this repo keeps real config in hidden files
 (.pi/, .agents/, .oxlintrc.json, .gitignore).
 
-## simple-english
+## caveman
 
-Always write prose in the `simple-english` skill style: ASD-STE100 Simplified
-Technical English, pragmatic mode. The full rule catalog is in
-`.pi/skills/simple-english/SKILL.md`.
-The only addition to this is be concise.
+Always write prose in the `caveman` skill style: terse, answer first, no
+ceremony. The full rules are in `.pi/skills/caveman/SKILL.md`.
+Chat replies only. Files, docs, code, and commits stay normal prose — the
+skill itself requires it.

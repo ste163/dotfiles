@@ -67,15 +67,15 @@ to install packages referenced in `settings.json` (package installs live under
 repo deploys automatically. No install step, and no `install.sh` rerun when
 you add one.
 
-- **simple-english** — vendored from
-  [AminBlg/SimpleEnglish](https://github.com/AminBlg/SimpleEnglish) (MIT, v1.3.0,
-  pinned at commit `8e8a008a13e4`, 2026-08-21). It enforces ASD-STE100
-  Simplified Technical English on technical prose. Mode is pragmatic; say
-  "STE" for strict mode. `APPEND_SYSTEM.md` keeps it always on.
+- **caveman** — vendored from
+  [JuliusBrussee/caveman](https://github.com/JuliusBrussee/caveman).
+  Only the single text skill is vendored — the extras
+  (commit, review, compress, stats, subagents, proxy, CLI) are excluded.
+  `APPEND_SYSTEM.md` keeps it always on for chat replies; files, docs, code,
+  and commits stay normal prose per the skill's own rules.
 
-To update the skill: re-download the files from `skills/simple-english/`
-in the upstream repo, then update the pin above. pi-lens autofix may reformat
-table padding on save — cosmetic only.
+To update the skill: re-download `skills/caveman/SKILL.md` from the upstream
+repo, then update the pin above.
 
 ### MCP
 
