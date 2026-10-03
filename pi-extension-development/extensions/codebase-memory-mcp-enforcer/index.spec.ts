@@ -28,10 +28,10 @@ const createFakePi = (): FakePi => {
   };
 };
 
-const CONFIG_PATH = "/virtual/home/.pi/agent/mcp-adapter.json";
+const CONFIG_PATH = "/virtual/home/.pi/agent/mcp.json";
 const DB_PATH = "/virtual/home/.cache/codebase-memory-mcp/virtual-repo.db";
 const REGISTERED_MCP =
-  '{"mcpServers":{"codebase-memory-mcp":{"command":"codebase-memory-mcp","lifecycle":"eager"}}}';
+  '{"mcpServers":{"codebase-memory-mcp":{"command":"codebase-memory-mcp","exposure":"direct"}}}';
 
 // Fully in-memory deps fake — no real disk I/O, no chdir, no temp dirs.
 // `existingPaths` holds the exact paths existsSync answers for; `files` holds
@@ -103,14 +103,14 @@ test("blocks bash code-search with the full ladder when the server is not regist
   assert.ok(reason.includes("MCP FIRST"));
   assert.ok(reason.includes("`grep -rn foo src/`"));
   assert.ok(reason.includes("1. Not connected?"));
-  assert.ok(reason.includes('mcp({ connect: "codebase-memory-mcp" })'));
+  assert.ok(reason.includes("`pi mcp list`"));
   assert.ok(reason.includes('repo_path: "/virtual/repo", mode: "fast"'));
-  assert.ok(reason.includes("codebase-memory-mcp_list_projects"));
+  assert.ok(reason.includes("mcp__codebase_memory_mcp__list_projects"));
   // Step 4 carries the extracted pattern even in the ladder.
   assert.ok(reason.includes('pattern: "foo", project: "<name>"'));
   assert.ok(reason.includes("Inform the user and stop this line of work"));
   assert.ok(!reason.includes("genuinely unavailable"));
-  assert.ok(!reason.includes("codebase_memory_mcp_"));
+  assert.ok(!reason.includes("mcp({ tool:"));
   assert.ok(reason.includes("Legal without the server"));
 });
 
@@ -122,13 +122,13 @@ test("blocks with a ready-made rewrite when the server is registered and the rep
   assert.ok(reason.includes("Try instead:"));
   assert.ok(
     reason.includes(
-      'mcp({ tool: "codebase-memory-mcp_search_code", args: { pattern: "session_start", project: "virtual-repo", mode: "files" } })',
+      'mcp__codebase_memory_mcp__search_code({ pattern: "session_start", project: "virtual-repo", mode: "files" })',
     ),
   );
   assert.ok(reason.includes("Patterns match literally"));
   assert.ok(reason.includes("`regex: true`"));
   assert.ok(!reason.includes("Not connected?"));
-  assert.ok(!reason.includes("codebase-memory-mcp_list_projects"));
+  assert.ok(!reason.includes("mcp__codebase_memory_mcp__list_projects"));
 });
 
 test("rewrites every violating segment with its own extracted pattern", async () => {
@@ -147,7 +147,7 @@ test("falls back to a placeholder pattern for unbalanced quotes and patternless 
   // "two words" splits into an unbalanced opener, and bare rg has no pattern at all.
   const reason = await blocked('grep "two words" src/ && rg', deps);
   assert.ok(reason.includes('pattern: "...", project: "virtual-repo"'));
-  assert.ok(reason.includes('mcp({ tool: "codebase-memory-mcp_search_code"'));
+  assert.ok(reason.includes("mcp__codebase_memory_mcp__search_code({"));
 });
 
 test("falls back to the ladder when the config path exists but reads empty", async () => {
@@ -167,7 +167,7 @@ test("blocks with the index-first path when the server is registered but the rep
   assert.ok(!reason.includes("Not connected?"));
 });
 
-test("treats a malformed or wrong-shaped adapter config as not registered, even with a db present", async () => {
+test("treats a malformed or wrong-shaped mcp config as not registered, even with a db present", async () => {
   const configs = [
     "not json",
     "42",
@@ -191,15 +191,8 @@ test("treats a malformed or wrong-shaped adapter config as not registered, even 
   }
 });
 
-test("registers from each adapter config source", async () => {
-  const sources = [
-    "/virtual/home/.config/mcp/mcp.json",
-    "/virtual/home/.agents/mcp.json",
-    "/virtual/home/.agents/mcp/mcp.json",
-    CONFIG_PATH,
-    "/virtual/repo/.mcp.json",
-    "/virtual/repo/.pi/mcp-adapter.json",
-  ];
+test("registers from each built-in mcp config source", async () => {
+  const sources = ["/virtual/home/.pi/agent/mcp.json", "/virtual/repo/.pi/mcp.json"];
   const results = await Promise.all(
     sources.map(async (source) => {
       const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, source], "/virtual/repo", {
@@ -213,8 +206,15 @@ test("registers from each adapter config source", async () => {
   }
 });
 
-test("ignores Pi's own mcp.json files, which the adapter no longer reads", async () => {
-  const legacyPaths = ["/virtual/home/.pi/agent/mcp.json", "/virtual/repo/.pi/mcp.json"];
+test("ignores adapter config files, which Pi's built-in MCP does not read", async () => {
+  const legacyPaths = [
+    "/virtual/home/.config/mcp/mcp.json",
+    "/virtual/home/.agents/mcp.json",
+    "/virtual/home/.agents/mcp/mcp.json",
+    "/virtual/home/.pi/agent/mcp-adapter.json",
+    "/virtual/repo/.mcp.json",
+    "/virtual/repo/.pi/mcp-adapter.json",
+  ];
   const results = await Promise.all(
     legacyPaths.map(async (legacyPath) => {
       const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, legacyPath], "/virtual/repo", {
@@ -229,7 +229,7 @@ test("ignores Pi's own mcp.json files, which the adapter no longer reads", async
 });
 
 test("honors PI_CODING_AGENT_DIR and ignores the default agent dir when set", async () => {
-  const customConfig = "/custom/agent/mcp-adapter.json";
+  const customConfig = "/custom/agent/mcp.json";
   const customDeps = createFakeDeps(
     ["/virtual/repo/.git", DB_PATH, customConfig],
     "/virtual/repo",
@@ -335,7 +335,7 @@ test("adds outside-project guidance when a blocked search targets absolute paths
   assert.ok(reason.includes("outside the project"));
   assert.ok(reason.includes("`/outside/dir`"));
   assert.ok(reason.includes("can only search indexed repositories"));
-  assert.ok(reason.includes("codebase-memory-mcp_list_projects"));
+  assert.ok(reason.includes("mcp__codebase_memory_mcp__list_projects"));
   const findReason = await blocked("find /outside -name x", deps);
   assert.ok(findReason.includes("`/outside`"));
 });
@@ -692,7 +692,7 @@ test("prepends the READY reminder with the decision rule when indexed", async ()
   })) as { systemPrompt: string };
   assert.ok(result.systemPrompt.startsWith("MCP READY"));
   assert.ok(result.systemPrompt.includes('project "virtual-repo" is indexed'));
-  assert.ok(result.systemPrompt.includes("codebase-memory-mcp_search_code"));
+  assert.ok(result.systemPrompt.includes("mcp__codebase_memory_mcp__search_code"));
   assert.ok(result.systemPrompt.includes("Know the path → read"));
   assert.ok(result.systemPrompt.includes("bash grep is legal"));
   assert.ok(result.systemPrompt.includes("awk/sed over files is code search"));
@@ -728,7 +728,7 @@ test("prepends the not-registered reminder when the server is missing", async ()
     systemPrompt: "BASE PROMPT",
   })) as { systemPrompt: string };
   assert.ok(result.systemPrompt.startsWith("MCP FIRST"));
-  assert.ok(result.systemPrompt.includes('mcp({ connect: "codebase-memory-mcp" })'));
+  assert.ok(result.systemPrompt.includes("`pi mcp list`"));
 });
 
 test("leaves the system prompt alone outside a git repo (walk breaks at the root)", async () => {

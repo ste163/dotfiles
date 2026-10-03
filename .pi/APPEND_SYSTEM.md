@@ -4,12 +4,12 @@ In a git repo, search code with the MCP tools, not grep/rg. The
 codebase-memory-mcp-enforcer extension blocks bash code search, and every
 block message names the exact call to make.
 
-Gateway form (the server auto-connects at startup):
+Direct calls (the built-in MCP server connects at session start):
 
-- `mcp({ tool: "codebase-memory-mcp_search_code", args: { pattern: "...", project: "<name>", mode: "files" } })` — grep-like search
-- `mcp({ tool: "codebase-memory-mcp_search_graph", ... })` — definitions, classes, routes
-- `mcp({ tool: "codebase-memory-mcp_get_code_snippet", ... })` — read a symbol's source
-- `mcp({ tool: "codebase-memory-mcp_list_projects" })` — learn the project name
+- `mcp__codebase_memory_mcp__search_code({ pattern: "...", project: "<name>", mode: "files" })` — grep-like search
+- `mcp__codebase_memory_mcp__search_graph({ ... })` — definitions, classes, routes
+- `mcp__codebase_memory_mcp__get_code_snippet({ ... })` — read a symbol's source
+- `mcp__codebase_memory_mcp__list_projects()` — learn the project name
 
 Legal bash: ls, pwd, echo, readlink, stat — and grep/rg over named
 docs/config files (.md .txt .json .yaml .yml .toml .conf .ini).

@@ -8,3 +8,6 @@
 .pi/npm/
 .pi/git/
 **logs
+
+.pi-lens/*
+!.pi-lens/config.json

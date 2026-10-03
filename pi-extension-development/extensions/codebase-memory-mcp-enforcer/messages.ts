@@ -42,16 +42,16 @@ const searchPattern = (segment: string): string => {
 };
 
 const searchCallLine = (project: string, pattern: string): string =>
-  'mcp({ tool: "codebase-memory-mcp_search_code", args: { pattern: "' +
+  'mcp__codebase_memory_mcp__search_code({ pattern: "' +
   pattern +
   '", project: "' +
   project +
-  '", mode: "files" } })';
+  '", mode: "files" })';
 
 const indexCallLine = (gitRoot: string): string =>
-  'mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "' +
-  gitRoot +
-  '", mode: "fast" } })';
+  'mcp__codebase_memory_mcp__index_repository({ repo_path: "' + gitRoot + '", mode: "fast" })';
+
+const listProjectsCallLine = (): string => "mcp__codebase_memory_mcp__list_projects()";
 
 const blockHeader = (violations: readonly string[]): string =>
   "MCP FIRST — code search blocked: " + violations.map((segment) => "`" + segment + "`").join(", ");
@@ -93,11 +93,13 @@ const blockBody = (
   }
   const first = violations[0] as string;
   return (
-    '1. Not connected?    mcp({ connect: "codebase-memory-mcp" })\n' +
-    '2. First time here?  mcp({ tool: "codebase-memory-mcp_index_repository", args: { repo_path: "' +
-    gitRoot +
-    '", mode: "fast" } })\n' +
-    '3. Project name?     mcp({ tool: "codebase-memory-mcp_list_projects" })\n' +
+    "1. Not connected?    Run `pi mcp list` in a shell. It must show the server connected; then restart pi.\n" +
+    "2. First time here?  " +
+    indexCallLine(gitRoot) +
+    "\n" +
+    "3. Project name?     " +
+    listProjectsCallLine() +
+    "\n" +
     "4. Search:           " +
     searchCallLine("<name>", searchPattern(first)) +
     "\n" +
@@ -132,7 +134,7 @@ export const blockMessage = (
       : "\n\nNote: this search targets files outside the project (" +
         outside.map((target) => "`" + target + "`").join(", ") +
         "). codebase-memory-mcp can only search indexed repositories — check " +
-        'mcp({ tool: "codebase-memory-mcp_list_projects" }). ' +
+        "mcp__codebase_memory_mcp__list_projects(). " +
         "Use `read` for known paths, or run the search in a shell outside pi.";
   return (
     header +
@@ -173,8 +175,7 @@ export const reminderMessage = (gitRoot: string, state: McpState): string => {
     );
   }
   return (
-    "MCP FIRST — codebase-memory-mcp is not registered; code grep will block. Connect: " +
-    'mcp({ connect: "codebase-memory-mcp" }).' +
+    "MCP FIRST — codebase-memory-mcp is not configured; code grep will block. Check the server entry in `~/.pi/agent/mcp.json` and run `pi mcp list` in a shell." +
     rule
   );
 };

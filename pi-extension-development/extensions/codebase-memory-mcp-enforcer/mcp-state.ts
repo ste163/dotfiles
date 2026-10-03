@@ -4,10 +4,9 @@
  * name and its db file are derivable without touching the server. A naming
  * mismatch just yields "not indexed" — the safe fallback.
  *
- * Registration is read from the pi-mcp-adapter config sources (v3 layout):
- * the user-global shared files, the adapter config in the Pi agent dir,
- * and the project files. Pi's own mcp.json files belong to Pi's built-in
- * MCP support, not the adapter, so they are ignored here.
+ * Registration is read from Pi's built-in MCP config sources: the
+ * user-level mcp.json in the Pi agent dir and the project-level
+ * .pi/mcp.json.
  */
 
 import { join } from "node:path";
@@ -24,17 +23,12 @@ const agentDirPath = (deps: CodebaseMemoryMcpEnforcerDeps): string =>
   deps.env("PI_CODING_AGENT_DIR") ?? join(deps.homeDir(), ".pi/agent");
 
 /**
- * The adapter's normal config sources, in the adapter's precedence order
- * (later entries win). The enforcer only needs membership, so the order
- * is irrelevant here.
+ * Pi's built-in MCP config sources. The enforcer only needs membership,
+ * so the order is irrelevant here.
  */
 const configSourcePaths = (deps: CodebaseMemoryMcpEnforcerDeps): readonly string[] => [
-  join(deps.homeDir(), ".config/mcp/mcp.json"),
-  join(deps.homeDir(), ".agents/mcp.json"),
-  join(deps.homeDir(), ".agents/mcp/mcp.json"),
-  join(agentDirPath(deps), "mcp-adapter.json"),
-  join(deps.cwd(), ".mcp.json"),
-  join(deps.cwd(), ".pi/mcp-adapter.json"),
+  join(agentDirPath(deps), "mcp.json"),
+  join(deps.cwd(), ".pi/mcp.json"),
 ];
 
 const parseJson = (raw: string): unknown | null => {

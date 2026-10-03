@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "codebase-memory-mcp": {
+      "command": "codebase-memory-mcp",
+      "description": "Search and read code in indexed git repositories; graph queries, traces, and architecture views are available through tool search.",
+      "exposure": "deferred",
+      "toolExposure": {
+        "search_code": "direct",
+        "search_graph": "direct",
+        "get_code_snippet": "direct",
+        "list_projects": "direct",
+        "index_repository": "direct"
+      }
+    }
+  }
+}

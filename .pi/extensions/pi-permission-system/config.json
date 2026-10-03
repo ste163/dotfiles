@@ -3,7 +3,6 @@
     "*": "allow",
     "edit": "allow",
     "write": "allow",
-    "mcp": "allow",
     "path": {
       "*": "allow",
       "*.env": "deny",
