@@ -4,7 +4,7 @@
   "defaultThinkingLevel": "max",
   "enableInstallTelemetry": false,
   "followUpMode": "one-at-a-time",
-  "lastChangelogVersion": "1.0.0",
+  "lastChangelogVersion": "1.0.1",
   "packages": [
     "npm:@gotgenes/pi-permission-system",
     "npm:pi-lens",
