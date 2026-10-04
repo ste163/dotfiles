@@ -554,7 +554,7 @@ local function hide()
 	clear_all()
 end
 
----Turn a buffer that just read an image file into a rendered image view.
+---Set up an image buffer (BufReadCmd path) as a rendered image view.
 ---@param buf integer
 ---@param path string
 local function setup(buf, path)
@@ -594,16 +594,17 @@ local function setup(buf, path)
 
 	placements[buf] = M.set(data, render_opts(win, w, h))
 end
--- Hijack image files before they are read. setup() runs after the read has
--- completed (schedule), so the binary content is cleared, not replaced.
-vim.api.nvim_create_autocmd("BufReadPre", {
+-- Hijack image files with BufReadCmd: the default read never happens, so
+-- the binary content is never loaded into the buffer or drawn to the screen
+-- (a BufReadPre + schedule approach flashes one frame of binary garbage).
+-- The buffer is set up synchronously and the image rendered instead. Only
+-- the extensions above match; every other file takes the normal read path.
+vim.api.nvim_create_autocmd("BufReadCmd", {
 	group = viewer_group,
 	pattern = EXTENSIONS,
 	callback = function(ev)
 		local path = ev.file and ev.file ~= "" and ev.file or vim.fn.expand("<afile>")
-		vim.schedule(function()
-			setup(ev.buf, path)
-		end)
+		setup(ev.buf, path)
 	end,
 })
 
