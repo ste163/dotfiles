@@ -10,16 +10,18 @@
 --   pdf        -- sips (macOS, no ghostscript) then pdftoppm (poppler),
 --                 then magick/ghostscript
 --
--- Converted bytes are cached under stdpath("cache")/native-image/, keyed by
--- path + mtime + density (density changes output for vector formats).
+-- Converted bytes are cached in memory for the session, keyed by path +
+-- mtime + density (density changes output for vector formats). Nothing is
+-- ever written to disk.
 --
 -- This is the growth file: animated gif, multi-page pdf, and new formats
 -- land here, isolated from the viewer UI.
 
 local M = {}
 
-local cache_dir = vim.fn.stdpath("cache") .. "/native-image"
-vim.fn.mkdir(cache_dir, "p")
+-- In-memory conversion cache: path+mtime+density -> PNG bytes. Session-
+-- scoped on purpose -- no cache directory to grow or clean up.
+local mem_cache = {}
 
 -- ImageMagick args per format. PNG passes through untouched.
 local function conversion_args(path, ext)
@@ -46,35 +48,26 @@ local function cache_key(path, ext)
 	return vim.fn.sha256(path .. ":" .. mtime .. ":" .. extra)
 end
 
----@param cache_file string
----@param data string
-local function write_cache(cache_file, data)
-	local f = io.open(cache_file, "wb")
-	if f then
-		f:write(data)
-		f:close()
-	end
-end
-
 ---Render PDF page 1 to PNG. macOS: sips does it natively, no ghostscript
 ---needed. Elsewhere: pdftoppm (poppler). Returns nil if neither works, so
----to_png() falls through to the magick/gs path.
+---to_png() falls through to the magick/gs path. Temp files live under
+---vim.fn.tempname() and are always cleaned up.
 ---@param path string
----@param cache_file string
 ---@return string? data
-local function pdf_to_png(path, cache_file)
+local function pdf_to_png(path)
 	if vim.fn.has("mac") == 1 and vim.fn.executable("sips") == 1 then
-		local tmp = cache_file .. ".tmp.png"
+		local tmp = vim.fn.tempname() .. ".png"
 		local res = vim.system({ "sips", "-s", "format", "png", "-Z", "1600", path, "--out", tmp }):wait()
 		if res.code == 0 and vim.uv.fs_stat(tmp) then
 			local data = vim.fn.readblob(tmp)
 			vim.uv.fs_unlink(tmp)
 			return data
 		end
+		vim.uv.fs_unlink(tmp)
 	end
 
 	if vim.fn.executable("pdftoppm") == 1 then
-		local dir = cache_file .. ".d"
+		local dir = vim.fn.tempname()
 		vim.fn.mkdir(dir, "p")
 		local res = vim.system({ "pdftoppm", "-f", "1", "-l", "1", "-png", "-r", "192", path, dir .. "/page" }):wait()
 		if res.code == 0 then
@@ -85,12 +78,14 @@ local function pdf_to_png(path, cache_file)
 				return data
 			end
 		end
+		vim.fn.delete(dir, "rf")
 	end
 
 	return nil
 end
 
----Convert an image file to PNG bytes, caching the result on disk.
+---Convert an image file to PNG bytes, caching the result in memory for
+---the session.
 ---@param path string
 ---@return string? png_bytes
 ---@return string? err
@@ -105,19 +100,15 @@ function M.to_png(path)
 	end
 
 	local key = cache_key(path, ext)
-	local cache_file = cache_dir .. "/" .. key .. ".png"
-	if vim.uv.fs_stat(cache_file) then
-		local ok, data = pcall(vim.fn.readblob, cache_file)
-		if ok then
-			return data
-		end
+	if mem_cache[key] then
+		return mem_cache[key]
 	end
 
 	-- PDF first: sips (macOS) or pdftoppm, both dependency-free paths.
 	if ext:lower() == "pdf" then
-		local data = pdf_to_png(path, cache_file)
+		local data = pdf_to_png(path)
 		if data then
-			write_cache(cache_file, data)
+			mem_cache[key] = data
 			return data
 		end
 	end
@@ -130,7 +121,7 @@ function M.to_png(path)
 		if ext:lower() == "svg" and vim.fn.executable("rsvg-convert") == 1 then
 			local res2 = vim.system({ "rsvg-convert", "-w", "1600", "-b", "none", path }, { stdout = true, stderr = true }):wait()
 			if res2.code == 0 and res2.stdout and #res2.stdout > 0 then
-				write_cache(cache_file, res2.stdout)
+				mem_cache[key] = res2.stdout
 				return res2.stdout
 			end
 		end
@@ -142,7 +133,7 @@ function M.to_png(path)
 		return nil, "magick produced no output"
 	end
 
-	write_cache(cache_file, data)
+	mem_cache[key] = data
 	return data
 end
 
