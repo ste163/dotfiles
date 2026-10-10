@@ -3,7 +3,7 @@
     "conform.nvim": {
       "rev": "3543d000dafbc41cc7761d860cfdb24e82154f75",
       "src": "https://github.com/stevearc/conform.nvim",
-      "version": "'v9.1.0'"
+      "version": "'3543d000dafbc41cc7761d860cfdb24e82154f75'"
     },
     "diffview.nvim": {
       "rev": "875d16dd8c8aa86f1a5c3b5cef49e1133980ae94",
@@ -65,18 +65,18 @@
       "version": "'58447c1fca354bbf184425e4a8d01deecbd6f3c4'"
     },
     "plenary.nvim": {
-      "rev": "50012918b2fc8357b87cff2a7f7f0446e47da174",
+      "rev": "74b06c6c75e4eeb3108ec01852001636d85a932b",
       "src": "https://github.com/nvim-lua/plenary.nvim",
-      "version": "'v0.1.4'"
+      "version": "'74b06c6c75e4eeb3108ec01852001636d85a932b'"
     },
     "telescope-fzf-native.nvim": {
       "rev": "6fea601bd2b694c6f2ae08a6c6fab14930c60e2c",
       "src": "https://github.com/nvim-telescope/telescope-fzf-native.nvim"
     },
     "telescope.nvim": {
-      "rev": "3333a52ff548ba0a68af6d8da1e54f9cd96e9179",
+      "rev": "5255aa27c422de944791318024167ad5d40aad20",
       "src": "https://github.com/nvim-telescope/telescope.nvim",
-      "version": "'v0.2.1'"
+      "version": "'5255aa27c422de944791318024167ad5d40aad20'"
     },
     "vim-fugitive": {
       "rev": "3b753cf8c6a4dcde6edee8827d464ba9b8c4a6f0",

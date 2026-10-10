@@ -60,11 +60,11 @@ vim.api.nvim_create_autocmd("PackChanged", {
 vim.pack.add({
 	{
 		src = "https://github.com/nvim-lua/plenary.nvim",
-		version = "v0.1.4",
+		version = "74b06c6c75e4eeb3108ec01852001636d85a932b", -- master
 	},
 	{
 		src = "https://github.com/nvim-telescope/telescope.nvim",
-		version = "v0.2.1",
+		version = "5255aa27c422de944791318024167ad5d40aad20", -- v0.2.2
 	},
 	{
 		src = "https://github.com/nvim-telescope/telescope-fzf-native.nvim",
