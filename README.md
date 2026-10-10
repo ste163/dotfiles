@@ -113,7 +113,7 @@ by this repo) — only brand-new extension directories need `install.sh` rerun.
 
 ## neovim
 
-> Setup using NVIM v0.12.2, using the built-in package manager and built-in tree-sitter
+> Setup using NVIM v0.13 (experimental), using the built-in package manager and built-in tree-sitter. Using the experimental v0.13 as it supports image rendering natively.
 
 ### Installing neovim
 
@@ -121,7 +121,7 @@ by this repo) — only brand-new extension directories need `install.sh` rerun.
 
 #### Fresh macOS install
 
-1. Download v0.12.2 from nvim github
+1. Download v0.13 experimental/nightly from nvim github. This is 
 2. Extract the archive:
 
     ```sh
@@ -174,7 +174,7 @@ by this repo) — only brand-new extension directories need `install.sh` rerun.
 #### Reinstall / upgrade
 
 Remove the old version:
-    ```sh
+    ```
     sudo rm -rf /opt/nvim
     ```
 

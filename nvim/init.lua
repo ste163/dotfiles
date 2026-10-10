@@ -19,6 +19,7 @@ require("plugins.mini-animate")
 require("plugins.rose-pine") -- must be before lualine so its palette is available
 require("plugins.markdown-preview") -- needs to be below theme
 require("plugins.lualine") -- uses rose-pine.palette, so rose-pine must load first
+require("plugins.native-image") -- replaces vim.ui.img with the tmux-passthrough backend
 require("plugins.which-key") -- should be last to load all keybinds
 
 local fugitive_group = vim.api.nvim_create_augroup("FugitiveTerminalFix", { clear = true })
