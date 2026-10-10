@@ -6,6 +6,8 @@ vim.pack.add({ {
 
 vim.keymap.set("n", "<leader>gs", vim.cmd.Git, { desc = 'Open Fugitive (git status)' })
 
+
+
 -- After leaving the commit message window, reopen the status window
 vim.api.nvim_create_autocmd("BufDelete", {
   callback = function()
