@@ -39,3 +39,25 @@ Always write prose in the `caveman` skill style: terse, answer first, no
 ceremony. The full rules are in `.pi/skills/caveman/SKILL.md`.
 Chat replies only. Files, docs, code, and commits stay normal prose — the
 skill itself requires it.
+
+## Code proposal format
+
+When proposing code changes bigger than a one-line tweak, reply in exactly
+three sections, in this order:
+
+## Reasoning
+- terse why: approach, key decisions, tradeoffs, assumptions.
+- surface the decision points first — the user redirects here before reading
+  the rest.
+
+## Files
+- repo-root-relative paths, one per line, annotated `(new)`, `(modify)`,
+  or `(delete)`, each with a terse one-line purpose.
+
+## Implementation
+One pseudo-code block per file, headed `### <path>`:
+- named functions/symbols first, abstract pseudo-code inside the bodies.
+- sketch-level: signatures + behavior, not full code.
+
+After any correction or redirect, re-emit the full three-section plan
+updated to match.
