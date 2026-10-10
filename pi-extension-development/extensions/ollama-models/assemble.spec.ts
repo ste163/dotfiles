@@ -4,7 +4,10 @@ import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { assembleModel, assembleModels } from "./assemble.ts";
 import type { ShowResponse } from "./ollama-api.ts";
 
-const COMPATIBILITY: NonNullable<ProviderModelConfig["compat"]> = {
+/** Chat-model narrow of the public config union: `reasoning` exists only on chat entries. */
+type ProviderChatModelConfig = Extract<ProviderModelConfig, { reasoning: boolean }>;
+
+const COMPATIBILITY: NonNullable<ProviderChatModelConfig["compat"]> = {
   supportsDeveloperRole: false,
   supportsReasoningEffort: true,
   supportsStore: false,
