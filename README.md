@@ -82,7 +82,9 @@ repo, then update the pin above.
 The `codebase-memory-mcp` server is core to this setup. Ensure it's downloaded and able to run:
 <https://deusdata.github.io/codebase-memory-mcp/>
 
-Update the mcp server with `codebase-memory-mcp update`
+Update with `codebase-memory-mcp update`. Each update regenerates its pi
+integration (tool extension `cbmem.ts`, `codebase-memory` skill, and the
+AGENTS.md CBM section); those files are machine-generated and gitignored.
 
 ### Extensions
 
