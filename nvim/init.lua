@@ -50,6 +50,9 @@ vim.api.nvim_create_autocmd("TermClose", {
 	callback = function()
 		if vim.v.event.status == 0 then
 			vim.api.nvim_buf_delete(0, { force = true })
+			vim.schedule(function()
+				vim.cmd.Git()
+			end)
 		end
 	end,
 })
