@@ -16,8 +16,9 @@
       "version": "'a462f416e2ce4744531c6256252dee99a7d34a83'"
     },
     "live-server.nvim": {
-      "rev": "85915d0e7dd926a54b0082aaeafc10a82bfe8288",
-      "src": "https://github.com/selimacerbas/live-server.nvim"
+      "rev": "4cb5c94a84cc653e0b32e0c9aed95465a36fc94d",
+      "src": "https://github.com/selimacerbas/live-server.nvim",
+      "version": "'4cb5c94a84cc653e0b32e0c9aed95465a36fc94d'"
     },
     "lualine.nvim": {
       "rev": "221ce6b2d999187044529f49da6554a92f740a96",
@@ -25,9 +26,9 @@
       "version": "'221ce6b2d999187044529f49da6554a92f740a96'"
     },
     "markdown-preview.nvim": {
-      "rev": "545cf3bc6c6425b33a9b25acef54f66e4035ca0f",
+      "rev": "dded03dc6cce87364b48260b2ffbace575a6add7",
       "src": "https://github.com/selimacerbas/markdown-preview.nvim",
-      "version": "'v1.9.0'"
+      "version": "'dded03dc6cce87364b48260b2ffbace575a6add7'"
     },
     "mason-lspconfig.nvim": {
       "rev": "a5671269a1ddfa7790cdf97c14e600e269da550f",
@@ -50,9 +51,9 @@
       "version": "'f01eac6eedf6197509dde8b66de0263207ee1877'"
     },
     "nvim-lspconfig": {
-      "rev": "9bafffaeaae363c5211080e06e04ed5b422fd5ad",
+      "rev": "4d363f93c3581b9212a24f7a830d7590b3f050af",
       "src": "https://github.com/neovim/nvim-lspconfig",
-      "version": "'v2.8.0'"
+      "version": "'4d363f93c3581b9212a24f7a830d7590b3f050af'"
     },
     "nvim-tree.lua": {
       "rev": "531b807b8f0d6f75016a0ee1e0cd5ce2086e9d95",

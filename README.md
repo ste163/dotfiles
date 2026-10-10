@@ -171,6 +171,28 @@ by this repo) — only brand-new extension directories need `install.sh` rerun.
 :lua vim.pack.del({'blink.cmp'})
 ```
 
+### Plugin pinning
+
+Every spec pins a commit sha in `version`, commented with its ref.
+
+**Update a plugin:**
+
+2. Edit `version` + comment
+3. Restart (lockfile updates; disk untouched)
+4. `:packupdate <name>` → review → `:write`
+5. Restart
+
+**Prune:** `:packdel <name>` removes disk + lockfile entry. `:packdel ++all` removes all inactive.
+
+**Fresh install:**
+
+```sh
+rm -rf ~/.local/share/nvim/site/pack/core/opt/*
+rm ~/Github/dotfiles/nvim/nvim-pack-lock.json
+```
+
+Restart — specs re-clone at their pinned shas; the lockfile rebuilds.
+
 #### Reinstall / upgrade
 
 Remove the old version:

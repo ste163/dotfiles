@@ -77,9 +77,9 @@ vim.api.nvim_create_autocmd("FileType", {
 --   queries_rel     — path inside tmp_dir to copy queries from (default: 'queries')
 --   queries_prepend — line prepended to highlights.scm
 local parsers = {
-	{ lang = "html", repo = "https://github.com/tree-sitter/tree-sitter-html" },
-	{ lang = "json", repo = "https://github.com/tree-sitter/tree-sitter-json" },
-	{ lang = "javascript", repo = "https://github.com/tree-sitter/tree-sitter-javascript" },
+	{ lang = "html", repo = "https://github.com/tree-sitter/tree-sitter-html", ref = "v0.23.2" },
+	{ lang = "json", repo = "https://github.com/tree-sitter/tree-sitter-json", ref = "v0.24.8" },
+	{ lang = "javascript", repo = "https://github.com/tree-sitter/tree-sitter-javascript", ref = "v0.25.0" },
 	{
 		-- tree-sitter-typescript ships two grammars in one repo.
 		-- The repo root queries/ are intentionally designed for BOTH the typescript
@@ -87,6 +87,7 @@ local parsers = {
 		-- that each parser compiles the queries against its own grammar — no chain.
 		-- Both inherit javascript for base JS highlighting.
 		repo = "https://github.com/tree-sitter/tree-sitter-typescript",
+		ref = "v0.23.2",
 		multi = {
 			{
 				lang = "typescript",
@@ -102,10 +103,10 @@ local parsers = {
 			},
 		},
 	},
-	{ lang = "css", repo = "https://github.com/tree-sitter/tree-sitter-css" },
-	{ lang = "yaml", repo = "https://github.com/tree-sitter-grammars/tree-sitter-yaml" },
-	{ lang = "dockerfile", repo = "https://github.com/camdencheek/tree-sitter-dockerfile" },
-	{ lang = "python", repo = "https://github.com/tree-sitter/tree-sitter-python" },
+	{ lang = "css", repo = "https://github.com/tree-sitter/tree-sitter-css", ref = "v0.25.0" },
+	{ lang = "yaml", repo = "https://github.com/tree-sitter-grammars/tree-sitter-yaml", ref = "v0.7.2" },
+	{ lang = "dockerfile", repo = "https://github.com/camdencheek/tree-sitter-dockerfile", ref = "v0.2.0" },
+	{ lang = "python", repo = "https://github.com/tree-sitter/tree-sitter-python", ref = "v0.25.0" },
 }
 
 -- Both directories live under site/ which is in neovim's runtimepath by default.
@@ -193,8 +194,10 @@ local function install_entry(entry, force)
 		end
 
 		local tmp_dir = vim.fn.tempname()
-		vim.notify("treesitter: cloning " .. entry.repo:match("[^/]+$") .. "...", vim.log.levels.INFO)
-		vim.system({ "git", "clone", "--depth=1", entry.repo, tmp_dir }, { text = true }, function(clone_result)
+		vim.notify("treesitter: cloning " .. entry.repo:match("[^/]+$") .. "@" .. entry.ref .. "...", vim.log.levels.INFO)
+		-- --depth=1 --branch works with tags and branch names; parsers are pinned
+		-- via each entry's `ref` so installs are reproducible across machines
+		vim.system({ "git", "clone", "--depth=1", "--branch", entry.ref, entry.repo, tmp_dir }, { text = true }, function(clone_result)
 			-- Switch to main thread: vim.fn calls and build_one require it.
 			vim.schedule(function()
 				if clone_result.code ~= 0 then
@@ -226,8 +229,10 @@ local function install_entry(entry, force)
 		end
 
 		local tmp_dir = vim.fn.tempname()
-		vim.notify("treesitter: cloning " .. entry.lang .. "...", vim.log.levels.INFO)
-		vim.system({ "git", "clone", "--depth=1", entry.repo, tmp_dir }, { text = true }, function(clone_result)
+		vim.notify("treesitter: cloning " .. entry.lang .. "@" .. entry.ref .. "...", vim.log.levels.INFO)
+		-- --depth=1 --branch works with tags and branch names; parsers are pinned
+		-- via each entry's `ref` so installs are reproducible across machines
+		vim.system({ "git", "clone", "--depth=1", "--branch", entry.ref, entry.repo, tmp_dir }, { text = true }, function(clone_result)
 			vim.schedule(function()
 				if clone_result.code ~= 0 then
 					vim.notify("treesitter: clone failed for " .. entry.lang, vim.log.levels.WARN)
