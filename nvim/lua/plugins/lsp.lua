@@ -24,6 +24,26 @@ require("mason").setup({
 	},
 })
 
+-- lua_ls defaults know vanilla Lua only, so every config file gets
+-- `undefined global: vim` and no vim.* types. Point it at Neovim's runtime:
+-- real API types from VIMRUNTIME, `vim` as a known global, LuaJIT as the
+-- runtime, and no third-party noise. Canonical block from :h lspconfig.
+-- Must run BEFORE mason-lspconfig's automatic_enable so the override is in
+-- place when the server gets enabled (see :h lspconfig-nvim-0.11).
+vim.lsp.config("lua_ls", {
+	settings = {
+		Lua = {
+			runtime = { version = "LuaJIT" },
+			diagnostics = { globals = { "vim" } },
+			workspace = {
+				library = { vim.env.VIMRUNTIME },
+				checkThirdParty = false,
+			},
+			telemetry = { enable = false },
+		},
+	},
+})
+
 -- Auto install and enable lsps
 require("mason-lspconfig").setup({
 	automatic_enable = {
@@ -37,6 +57,7 @@ require("mason-lspconfig").setup({
 		"pyright",
 	},
 })
+
 
 -- Enable built-in LSP completion. Fires once per LSP client attach.
 vim.api.nvim_create_autocmd("LspAttach", {
