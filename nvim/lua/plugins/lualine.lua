@@ -1,7 +1,7 @@
 -- Status line (bottom) + winbar (per-window filename at top of each split)
 vim.pack.add({ {
 	src = "https://github.com/nvim-lualine/lualine.nvim",
-	version = "master",
+	version = "221ce6b2d999187044529f49da6554a92f740a96", -- master
 } })
 
 local p = require("rose-pine.palette")

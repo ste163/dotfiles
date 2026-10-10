@@ -13,16 +13,16 @@
     "gitsigns.nvim": {
       "rev": "a462f416e2ce4744531c6256252dee99a7d34a83",
       "src": "https://github.com/lewis6991/gitsigns.nvim",
-      "version": "'v2.1.0'"
+      "version": "'a462f416e2ce4744531c6256252dee99a7d34a83'"
     },
     "live-server.nvim": {
       "rev": "85915d0e7dd926a54b0082aaeafc10a82bfe8288",
       "src": "https://github.com/selimacerbas/live-server.nvim"
     },
     "lualine.nvim": {
-      "rev": "a905eeebc4e63fdc48b5135d3bf8aea5618fb21c",
+      "rev": "221ce6b2d999187044529f49da6554a92f740a96",
       "src": "https://github.com/nvim-lualine/lualine.nvim",
-      "version": "'master'"
+      "version": "'221ce6b2d999187044529f49da6554a92f740a96'"
     },
     "markdown-preview.nvim": {
       "rev": "545cf3bc6c6425b33a9b25acef54f66e4035ca0f",
@@ -47,7 +47,7 @@
     "neovim": {
       "rev": "f01eac6eedf6197509dde8b66de0263207ee1877",
       "src": "https://github.com/rose-pine/neovim",
-      "version": "'v3.0.2'"
+      "version": "'f01eac6eedf6197509dde8b66de0263207ee1877'"
     },
     "nvim-lspconfig": {
       "rev": "9bafffaeaae363c5211080e06e04ed5b422fd5ad",
@@ -55,9 +55,9 @@
       "version": "'v2.8.0'"
     },
     "nvim-tree.lua": {
-      "rev": "85d1145ac71c1b8e1423862c78165a1f609faf60",
+      "rev": "531b807b8f0d6f75016a0ee1e0cd5ce2086e9d95",
       "src": "https://github.com/nvim-tree/nvim-tree.lua",
-      "version": "'v1.17.0'"
+      "version": "'531b807b8f0d6f75016a0ee1e0cd5ce2086e9d95'"
     },
     "nvim-web-devicons": {
       "rev": "58447c1fca354bbf184425e4a8d01deecbd6f3c4",

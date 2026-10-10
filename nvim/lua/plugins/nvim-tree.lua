@@ -1,7 +1,7 @@
 -- File tree manager. Replacement for the builtin one (netrw)
 vim.pack.add({ {
   src = "https://github.com/nvim-tree/nvim-tree.lua",
-  version = "v1.17.0",
+  version = "531b807b8f0d6f75016a0ee1e0cd5ce2086e9d95", -- v1.18.0
 } })
 
 local function on_attach(bufnr)

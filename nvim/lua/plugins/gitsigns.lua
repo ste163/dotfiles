@@ -2,7 +2,7 @@
 -- (ie, shows changed files, blame)
 vim.pack.add({ {
   src = 'https://github.com/lewis6991/gitsigns.nvim',
-  version = 'v2.1.0'
+  version = 'a462f416e2ce4744531c6256252dee99a7d34a83', -- v2.1.0
 } })
 
 require('gitsigns').setup({

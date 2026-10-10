@@ -1,7 +1,7 @@
 -- Theme
 vim.pack.add({ {
   src = "https://github.com/rose-pine/neovim",
-  version = "v3.0.2",
+  version = "f01eac6eedf6197509dde8b66de0263207ee1877", -- v3.0.2
 } })
 
 require("rose-pine").setup({
