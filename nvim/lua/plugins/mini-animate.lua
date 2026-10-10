@@ -1,6 +1,7 @@
 -- Adds animations to scrolling, windows
 vim.pack.add({ {
   src = "https://github.com/nvim-mini/mini.animate",
+  version = "1c243baec3a308ea3552fbbd2f5d24ed804bf17d", -- v0.18.0
 } })
 
 -- Fixes mouse scroll breaking if you scroll too quickly

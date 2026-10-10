@@ -1,7 +1,7 @@
 -- VS Code-like Diff and Merge View
 vim.pack.add({ {
   src = 'https://github.com/dlyongemallo/diffview.nvim',
-  version = 'v0.31'
+  version = '875d16dd8c8aa86f1a5c3b5cef49e1133980ae94', -- v0.38
 } })
 
 local function toggle_diffview()
