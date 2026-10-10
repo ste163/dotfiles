@@ -1,5 +1,10 @@
 shell-integration = "zsh"
 
+# Every Ghostty surface attaches to the tmux session, restoring the last
+# saved state after a reboot. shell: prefix forces /bin/sh -c so ~ expands
+# (a bare command path is exec'd directly, no expansion).
+command = shell:~/.local/bin/tmux-auto-saver
+
 font-family = "BitstromWera Nerd Font Mono"
 font-size = 16
 

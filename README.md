@@ -36,7 +36,7 @@ Install the Nerd font from `fonts/`.
 brew install ghostty
 ```
 
-## tmux
+## tmux (at least v3.8)
 
 ```sh
 brew install tmux

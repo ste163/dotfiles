@@ -9,18 +9,27 @@ SRCS=(
   "$DOTFILES/btop.conf"
   "$DOTFILES/nvim"
   "$DOTFILES/ghostty"
+  "$DOTFILES/tmux/tmux-state-save"
+  "$DOTFILES/tmux/tmux-state-restore"
+  "$DOTFILES/tmux/tmux-auto-saver"
 )
 DSTS=(
   "$HOME/.tmux.conf"
   "$HOME/.config/btop/btop.conf"
   "$HOME/.config/nvim"
   "$HOME/.config/ghostty"
+  "$HOME/.local/bin/tmux-state-save"
+  "$HOME/.local/bin/tmux-state-restore"
+  "$HOME/.local/bin/tmux-auto-saver"
 )
 TYPES=(
   "file"
   "file"
   "dir"
   "dir"
+  "file"
+  "file"
+  "file"
 )
 
 link_entry() {
