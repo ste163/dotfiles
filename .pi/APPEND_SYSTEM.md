@@ -59,5 +59,15 @@ One pseudo-code block per file, headed `### <path>`:
 - named functions/symbols first, abstract pseudo-code inside the bodies.
 - sketch-level: signatures + behavior, not full code.
 
-After any correction or redirect, re-emit the full three-section plan
-updated to match.
+## Questions
+Only if anything is genuinely ambiguous or needs a user decision.
+Omit the section entirely when nothing needs asking. Each item is one
+numbered line, phrased as a concrete question, so the user can reply by
+number. If there's a proposed solution, say "Proposed solution" under the
+question. Answered questions get folded into the Reasoning section.
+1. `question`?
+   Proposed solution: `solution`
+2. `question`?
+
+After any correction or redirect, re-emit the full plan (three sections
+plus Questions when present) updated to match.
