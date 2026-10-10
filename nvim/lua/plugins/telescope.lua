@@ -68,6 +68,7 @@ vim.pack.add({
 	},
 	{
 		src = "https://github.com/nvim-telescope/telescope-fzf-native.nvim",
+		version = "b25b749b9db64d375d782094e2b9dce53ad53a40", -- main
 	},
 })
 

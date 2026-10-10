@@ -30,14 +30,14 @@
       "version": "'v1.9.0'"
     },
     "mason-lspconfig.nvim": {
-      "rev": "0c2823e0418f3d9230ff8b201c976e84de1cb401",
+      "rev": "a5671269a1ddfa7790cdf97c14e600e269da550f",
       "src": "https://github.com/mason-org/mason-lspconfig.nvim",
-      "version": "'v2.2.0'"
+      "version": "'a5671269a1ddfa7790cdf97c14e600e269da550f'"
     },
     "mason.nvim": {
-      "rev": "44d1e90e1f66e077268191e3ee9d2ac97cc18e65",
+      "rev": "2a6940af80375532e5e9e7c1f2fc6319a1b7a69d",
       "src": "https://github.com/mason-org/mason.nvim",
-      "version": "'v2.2.1'"
+      "version": "'2a6940af80375532e5e9e7c1f2fc6319a1b7a69d'"
     },
     "mini.animate": {
       "rev": "1c243baec3a308ea3552fbbd2f5d24ed804bf17d",
@@ -70,8 +70,9 @@
       "version": "'74b06c6c75e4eeb3108ec01852001636d85a932b'"
     },
     "telescope-fzf-native.nvim": {
-      "rev": "6fea601bd2b694c6f2ae08a6c6fab14930c60e2c",
-      "src": "https://github.com/nvim-telescope/telescope-fzf-native.nvim"
+      "rev": "b25b749b9db64d375d782094e2b9dce53ad53a40",
+      "src": "https://github.com/nvim-telescope/telescope-fzf-native.nvim",
+      "version": "'b25b749b9db64d375d782094e2b9dce53ad53a40'"
     },
     "telescope.nvim": {
       "rev": "5255aa27c422de944791318024167ad5d40aad20",
