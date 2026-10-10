@@ -30,7 +30,10 @@ vim.api.nvim_create_autocmd("FileType", {
 	pattern = "fugitive",
 	callback = function()
 		-- Open a real terminal for Committing
-		vim.keymap.set("n", "cc", ":term git commit -v<CR>", { buffer = true, silent = true })
+		vim.keymap.set("n", "cc", function()
+			vim.cmd("term git commit -v")
+			vim.b.fugitive_auto_reopen = true -- only commit reopens fugitive after success
+		end, { buffer = true, silent = true })
 	end,
 })
 
@@ -44,15 +47,18 @@ vim.api.nvim_create_autocmd("TermOpen", {
 	end,
 })
 
--- Automatically close the terminal window if the command finishes successfully and re-opens fugitive
+-- Close the terminal window on success; reopen fugitive only for the commit terminal
 vim.api.nvim_create_autocmd("TermClose", {
 	group = fugitive_group,
 	callback = function()
 		if vim.v.event.status == 0 then
+			local reopen = vim.b.fugitive_auto_reopen
 			vim.api.nvim_buf_delete(0, { force = true })
-			vim.schedule(function()
-				vim.cmd.Git()
-			end)
+			if reopen then
+				vim.schedule(function()
+					vim.cmd.Git()
+				end)
+			end
 		end
 	end,
 })
