@@ -24,6 +24,15 @@ One pseudo-code block per file, headed ### <path>.
 ## Questions
 Only if anything is genuinely ambiguous. Omit the section when nothing needs asking. Number each question so the user can reply by number. Say "Proposed solution" under a question when you have one.`;
 
+// The step rules shared by the execution context and the kickoff text.
+// Registration goes through the plan_step_complete tool, never through
+// text tags, so the tracker never has to parse prose.
+const STEP_RULES_TEXT = `Step rules:
+- A step is complete only when its signal arrived in this turn: a tool result, a command output, or a user message. Background events are not signals.
+- Register each completed step by calling the plan_step_complete tool with the step number. One call per step, in order. The tool blocks wrong, duplicate, and out-of-order calls; read its reply.
+- Never pre-claim a step, never batch calls.
+- Never register in a later turn, except to answer a progress check. A progress check names each unregistered step; call plan_step_complete for each step you completed.`;
+
 export const overviewContextMessage: CustomMessage = {
   customType: "plan-mode-overview-context",
   content: `[PLAN MODE ACTIVE]
@@ -73,11 +82,7 @@ ${remaining}
 
 Execute each step in order.
 
-Step rules:
-- A step is complete only when its signal arrived in this turn: a tool result, a command output, or a user message. Background events are not signals.
-- Mark exactly one [DONE:n] tag per step, in the same turn that completes it.
-- Never batch tags, never pre-claim a step.
-- Never tag in a later turn, except to repair a forgotten tag when the extension asks.`,
+${STEP_RULES_TEXT}`,
     display: false,
   };
 };
@@ -141,11 +146,7 @@ ${todos.map((t) => `${t.step}. ${t.text}`).join("\n")}
 
 Start with: ${first}
 
-Step rules:
-- A step is complete only when its signal arrived in this turn: a tool result, a command output, or a user message. Background events are not signals.
-- Mark exactly one [DONE:n] tag per step, in the same turn that completes it.
-- Never batch tags, never pre-claim a step.
-- Never tag in a later turn, except to repair a forgotten tag when the extension asks.`;
+${STEP_RULES_TEXT}`;
 
 export const executeMessage = (todos: TodoItem[], first: string): CustomMessage => ({
   customType: "plan-mode-execute",
@@ -155,19 +156,66 @@ Remaining steps:
 ${todos.map((t) => `${t.step}. ${t.text}`).join("\n")}
 
 Start with: ${first}
-After completing a step, include a [DONE:n] tag in your response.`,
+After completing a step, call the plan_step_complete tool with its number.`,
   display: true,
 });
 
-// Sent as a user message after a turn that wrote but tagged nothing. The
-// repair tag is allowed only here, so the model never batches old tags.
-export const nudgeText = `[PLAN MODE - PROGRESS CHECK]
-Your last turn used write or edit tools but included no [DONE:n] tag. Did a plan step complete in that turn?
+// Block reasons for invalid plan_step_complete calls. The block result is
+// the tool's reply, so every reason names the exact problem and the fix.
 
-- If yes, reply with exactly one [DONE:n] tag for each step that completed.
-- If no step completed, reply that none completed.
+export const stepToolPhaseReason = (): string =>
+  "plan_step_complete is only available while executing a plan.";
+
+export const stepOutOfRangeReason = (step: number | string, total: number): string =>
+  `No matching step ${step}: ${total === 0 ? "the plan has no steps" : `the plan has steps 1..${total}`}.`;
+
+export const stepAlreadyRegisteredReason = (step: number): string =>
+  `Step ${step} is already registered.`;
+
+export const stepNotNextReason = (step: number, pending: TodoItem): string =>
+  `Step ${step} is not next: step ${pending.step} (${pending.text}) is still pending. Register steps in order.`;
+
+// The tool result is the acknowledgment for a valid registration: the
+// model sees the step, its file, and the live completed count.
+export const registeredStepResult = (item: TodoItem, completed: number, total: number): string =>
+  `Registered step ${item.step} (${item.text}). Completed: ${completed}/${total}.`;
+
+// Sent as a user message after a run that wrote but registered no step.
+// The check names every missing step with its file, so the reply never
+// has to guess which step the tracker wants.
+export const progressCheckText = (
+  missing: TodoItem[],
+  completed: number,
+  total: number,
+  reason: "write" | "narrowed",
+): string => {
+  const reasonLine =
+    reason === "write"
+      ? "Your last run used write or edit tools but registered no step. If you completed any listed step in that run, call the plan_step_complete tool with its number."
+      : "A previous reply registered some steps; the step(s) above remain unregistered. If you completed any of them, call the plan_step_complete tool with its number.";
+  return `[PLAN MODE - PROGRESS CHECK]
+Completed: ${completed}/${total}.
+
+Untagged steps:
+${missing.map((item) => `- Step ${item.step} (${item.text}): call plan_step_complete(${item.step})`).join("\n")}
+
+${reasonLine}
+If no listed step completed, reply "none completed".
 
 Do not redo any work; this is a progress check only.`;
+};
+
+// Acknowledgment for a check reply that registered nothing. The check then
+// closes: the same missing set never re-fires.
+export const progressAckMessage = (
+  missing: number[],
+  completed: number,
+  total: number,
+): CustomMessage => ({
+  customType: "plan-mode-progress-ack",
+  content: `Missing registrations: ${missing.join(", ")}. Completed: ${completed}/${total}.`,
+  display: true,
+});
 
 export const completeMessage = (todos: TodoItem[]): CustomMessage => ({
   customType: "plan-mode-complete",

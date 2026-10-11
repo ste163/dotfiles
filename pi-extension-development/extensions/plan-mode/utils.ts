@@ -249,28 +249,10 @@ export const planFormatIssue = (message: string): string | null => {
   return null;
 };
 
-export const extractDoneSteps = (message: string): number[] =>
-  Array.from(message.matchAll(/\[DONE:(\d+)\]/gi)).flatMap((match) => {
-    const step = Number(match[1]);
-    return Number.isFinite(step) ? [step] : [];
-  });
+/** Steps that are still unregistered, in plan order. */
+export const missingSteps = (items: TodoItem[]): TodoItem[] =>
+  items.filter((item) => !item.completed);
 
-/**
- * Pure: returns a new list, never mutates the input. The count is how many
- * steps changed, not how many markers matched, so callers only refresh the
- * UI when something actually flipped.
- */
-export const markCompletedSteps = (
-  text: string,
-  items: TodoItem[],
-): { todos: TodoItem[]; completed: number } => {
-  const doneSteps = extractDoneSteps(text);
-  const todos = items.map((item) =>
-    doneSteps.includes(item.step) && !item.completed ? { ...item, completed: true } : item,
-  );
-  const completed = todos.reduce(
-    (count, item, index) => (item.completed && !items[index]?.completed ? count + 1 : count),
-    0,
-  );
-  return { todos, completed };
-};
+/** Same members in both lists, order-independent. */
+export const sameNumbers = (a: number[], b: number[]): boolean =>
+  a.length === b.length && a.every((n) => b.includes(n));

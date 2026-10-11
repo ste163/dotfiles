@@ -7,11 +7,11 @@ touches disk until you approve a path.
 
 ## Phases
 
-| Phase     | Write/edit tools         | Bash                | Notes                                        |
-| --------- | ------------------------ | ------------------- | -------------------------------------------- |
-| overview  | Removed from the model   | Read-only guardrail | Discuss, question, propose. No file touched. |
-| plan-file | One locked file writable | Read-only guardrail | The approved plan is written to that file.   |
-| executing | Full access              | Full access         | Steps tracked with `[DONE:n]` tags.          |
+| Phase     | Write/edit tools         | Bash                | Notes                                                |
+| --------- | ------------------------ | ------------------- | ---------------------------------------------------- |
+| overview  | Removed from the model   | Read-only guardrail | Discuss, question, propose. No file touched.         |
+| plan-file | One locked file writable | Read-only guardrail | The approved plan is written to that file.           |
+| executing | Full access              | Full access         | Steps registered with the `plan_step_complete` tool. |
 
 The only way to reach plan-file is through overview. Not every plan needs a
 file: from overview you can also execute directly.
@@ -40,26 +40,44 @@ session in overview.
      executed with progress tracking. Only offered once a plan parses and
      no questions are left open.
 4. In the plan-file phase the same choice appears, plus `Refine the plan`.
-5. The agent marks each finished step with exactly one `[DONE:n]` tag,
-   in the same turn that completes the step.
+5. The agent registers each finished step by calling the `plan_step_complete`
+   tool with the step number, right after the step's work finished.
 
 ## Step rules
 
 Injected while executing:
 
 - The execution context lists the completed count, the next step, and
-  every remaining step, so a forgotten tag shows up as a list that did
-  not advance.
+  every remaining step, so an unregistered step shows up as a list that
+  did not advance.
 - A step is complete only when its signal arrived in that turn: a tool
   result, a command output, or a user message. Background events are not
   signals.
-- Exactly one `[DONE:n]` tag per step, in the turn that completes it.
-  Never batch tags, never pre-claim, never tag in a later turn — except
-  to repair a forgotten tag when the nudge asks.
+- Register each completed step by calling the `plan_step_complete` tool
+  with the step number. One call per step, in order. Registration is a
+  validated tool call, not a text tag: the tracker never parses prose.
+- The tool blocks wrong, duplicate, and out-of-order calls and reports
+  the reason in-band:
+  - `No matching step N: the plan has steps 1..M.`
+  - `Step N is already registered.`
+  - `Step N is not next: step K (file) is still pending.`
+- A valid call replies `Registered step N (file). Completed: X/Y.` — the
+  tool result is the acknowledgment, so registration feedback is
+  immediate and structured.
+- Never pre-claim a step, never batch calls, never register in a later
+  turn — except to answer a progress check. A progress check names each
+  unregistered step; call `plan_step_complete` for each step you
+  completed.
 
-The nudge: after a turn that used write or edit tools but tagged nothing,
-the extension sends a progress check asking whether a step completed.
-Repair tags are allowed only there. The nudge never fires twice in a row.
+The progress check: after a run that used write or edit tools but
+registered no step, the extension sends a check naming every missing
+step with its file path and the current count. The check is deduplicated
+on the missing-step set: a reply that changes nothing closes the check
+with an acknowledgment (`Missing registrations: ...`), a reply that
+registers some steps re-fires one narrowed check for the remainder, and
+`none completed` closes it. Nothing ever loops, and each narrowed check
+covers strictly fewer steps. The check state lives in memory only and
+never persists across sessions.
 
 Injected while overview is active:
 
@@ -75,13 +93,16 @@ while plan mode is active. The transcript keeps every message. The
 model's knowledge that the plan is complete comes from its own closing
 response, not from plan-mode messages.
 
-Step marks appear live: plan-mode watches the assistant stream and flips
-a todo the moment its `[DONE:n]` tag completes, refreshing the widget.
-The turn-end pass persists and stays as the backstop.
+Registration is live: a `plan_step_complete` call marks the step the
+moment the tool call fires, persists the state, and refreshes the widget.
+The turn-end pass checkpoints the state. On resume, the extension
+re-scans assistant tool calls after the execute marker, so registrations
+that missed a persist still restore.
 
 The todo widget shows a sliding window of up to four pending steps.
 Completed ones stay visible until two are done, then the batch drops
-and the next pending steps slide in. The full list still reaches the
+permanently and the window shows only the next pending steps — a stuck
+pending step cannot freeze the window. The full list still reaches the
 model through the execution context.
 
 ## Paths
