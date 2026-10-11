@@ -7,10 +7,10 @@ touches disk until you approve a path.
 
 ## Phases
 
-| Phase     | Write/edit tools         | Bash                | Notes                                        |
-| --------- | ------------------------ | ------------------- | --------------------------------------------------------- |
-| overview  | Removed from the model   | Read-only guardrail | Discuss, question, propose. No file touched. |
-| plan-file | One locked file writable | Read-only guardrail | The approved plan is written to that file.   |
+| Phase     | Write/edit tools         | Bash                | Notes                                                |
+| --------- | ------------------------ | ------------------- | ---------------------------------------------------- |
+| overview  | Removed from the model   | Read-only guardrail | Discuss, question, propose. No file touched.         |
+| plan-file | One locked file writable | Read-only guardrail | The approved plan is written to that file.           |
 | executing | Full access              | Full access         | Steps registered with the `plan_step_complete` tool. |
 
 The only way to reach plan-file is through overview. Not every plan needs a

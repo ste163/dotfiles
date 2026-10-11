@@ -533,6 +533,11 @@ export const createPlanModeExtension = (
   });
 
   pi.on("before_agent_start", () => {
+    // Re-assert the tool gate at every agent run: a mid-session extension
+    // reload re-registers the tool inactive, and only this handler re-runs
+    // for a restored executing phase.
+    setPlanToolActive(state.phase === "executing");
+
     if (state.phase === "overview") {
       return { message: overviewContextMessage };
     }

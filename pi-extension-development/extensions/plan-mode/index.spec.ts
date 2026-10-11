@@ -1419,6 +1419,35 @@ test("injects nothing while off or executing with an empty todo list", async () 
   assert.equal(await callHandler(pi, "before_agent_start", {}, ctx2.ctx), undefined);
 });
 
+test("re-asserts the plan tool gate at every agent run while executing", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [{ step: 1, text: "a", completed: false }],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+  assert.ok(pi.activeTools.includes("plan_step_complete"));
+
+  // Simulate a mid-session reload: the tool got re-registered inactive.
+  pi.setActiveTools(pi.activeTools.filter((name) => name !== "plan_step_complete"));
+  await callHandler(pi, "before_agent_start", {}, ctx);
+
+  assert.ok(pi.activeTools.includes("plan_step_complete"));
+});
+
+test("re-asserts the plan tool gate off while not executing", async () => {
+  const { pi } = createExtension();
+  const { ctx } = createFakeCtx();
+
+  await callHandler(pi, "before_agent_start", {}, ctx);
+
+  assert.ok(!pi.activeTools.includes("plan_step_complete"));
+});
+
 // --- Context filtering ---
 
 test("drops every plan-mode message out of context while off", async () => {
