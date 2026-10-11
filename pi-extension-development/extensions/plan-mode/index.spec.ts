@@ -21,6 +21,40 @@ interface FakeEntry {
 
 const DEFAULT_ACTIVE_TOOLS = ["read", "bash", "grep", "find", "ls", "write", "edit"];
 
+// Plan fixtures in the wrapped code proposal format: "# Plan" header,
+// "##" sections, "###" path blocks, optional "## Questions".
+const PLAN_ONE_STEP = `# Plan
+## Reasoning
+- one thing.
+
+## Files
+- src/a.ts (modify) — first purpose
+
+## Implementation
+### src/a.ts
+change a.`;
+
+const PLAN_TWO_STEPS = `# Plan
+## Reasoning
+- two things.
+
+## Files
+- src/a.ts (modify) — first purpose
+- src/b.ts (new) — second purpose
+
+## Implementation
+### src/a.ts
+change a.
+
+### src/b.ts
+create b.`;
+
+const PLAN_WITH_QUESTIONS = `${PLAN_TWO_STEPS}
+## Questions
+1. window size?
+   Proposed solution: 4
+`;
+
 interface FakePi {
   handlers: Record<string, Handler[]>;
   commands: Record<string, { description: string; handler: CommandHandler }>;
@@ -608,7 +642,7 @@ test("Continue planning keeps the overview phase untouched", async () => {
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
 
@@ -629,12 +663,7 @@ test("Write plan to file creates the file blank, transitions, restores tools, an
     pi,
     "agent_end",
     {
-      messages: [
-        assistantMessage([
-          { type: "tool_use", id: "x" },
-          textBlock("Plan:\n1. First step here\n2. Second step here"),
-        ]),
-      ],
+      messages: [assistantMessage([{ type: "tool_use", id: "x" }, textBlock(PLAN_TWO_STEPS)])],
     },
     ctx,
   );
@@ -644,14 +673,14 @@ test("Write plan to file creates the file blank, transitions, restores tools, an
   assert.equal(pi.sentMessages.length, 1);
   assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-write-file");
   assert.match(pi.sentMessages[0]?.message.content ?? "", /my-plan\.md was created blank/);
-  assert.match(pi.sentMessages[0]?.message.content ?? "", /First step here/);
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /src\/a\.ts: first purpose/);
   assert.match(pi.sentMessages[0]?.message.content ?? "", /Ask no questions/);
   assert.deepEqual(pi.sentMessages[0]?.options, { triggerTurn: true, deliverAs: "followUp" });
   assert.deepEqual(lastEntryData(pi), {
     phase: "plan-file",
     todos: [
-      { step: 1, text: "First step here", completed: false },
-      { step: 2, text: "Second step here", completed: false },
+      { step: 1, text: "src/a.ts: first purpose", completed: false },
+      { step: 2, text: "src/b.ts: second purpose", completed: false },
     ],
     planFileName: "my-plan.md",
   });
@@ -668,7 +697,7 @@ test("a failed blank-file write notifies and keeps overview", async () => {
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
 
@@ -733,7 +762,7 @@ test("cancelling the name prompt at Write plan to file keeps overview and the to
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
 
@@ -753,7 +782,7 @@ test("re-prompts on a plan file name collision before transitioning", async () =
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
 
@@ -769,7 +798,7 @@ test("Execute plan from overview starts execution with full access", async () =>
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
 
@@ -777,16 +806,16 @@ test("Execute plan from overview starts execution with full access", async () =>
   assert.equal(pi.sentMessages.length, 2);
   assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-todo-list");
   assert.equal(pi.sentMessages[1]?.message.customType, "plan-mode-execute");
-  assert.match(pi.sentMessages[1]?.message.content ?? "", /Start with: First step here/);
+  assert.match(pi.sentMessages[1]?.message.content ?? "", /Start with: src\/a\.ts: first purpose/);
   assert.deepEqual(pi.sentMessages[1]?.options, { deliverAs: "followUp" });
   assert.equal(pi.sentUserMessages.length, 1);
   assert.deepEqual(pi.sentUserMessages[0]?.options, { deliverAs: "followUp" });
   assert.match(pi.sentUserMessages[0]?.text ?? "", /Execute the plan\./);
-  assert.match(pi.sentUserMessages[0]?.text ?? "", /Start with: First step here/);
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Start with: src\/a\.ts: first purpose/);
   assert.match(pi.sentUserMessages[0]?.text ?? "", /Background events are not signals/);
   assert.deepEqual(lastEntryData(pi), {
     phase: "executing",
-    todos: [{ step: 1, text: "First step here", completed: false }],
+    todos: [{ step: 1, text: "src/a.ts: first purpose", completed: false }],
     planFileName: null,
   });
 });
@@ -808,7 +837,7 @@ test("an unparseable plan sends one format correction and skips the next-action 
   assert.equal(selectConsumed(), 0);
   assert.equal(pi.sentMessages.length, 1);
   assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-plan-format");
-  assert.match(pi.sentMessages[0]?.message.content ?? "", /missing a 'Plan:' header/);
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /missing a '# Plan' header/);
   assert.deepEqual(pi.sentMessages[0]?.options, { deliverAs: "followUp", triggerTurn: true });
   assert.ok(notifications.some((n) => n.message.includes("Plan format invalid")));
   assert.deepEqual(pi.activeTools, ["read", "bash", "grep", "find", "ls"]);
@@ -838,7 +867,7 @@ test("a second unparseable plan only notifies and shows the prompt once", async 
   assert.equal(pi.sentMessages.length, 1);
   assert.equal(selectChoices.length, 1);
   assert.deepEqual(selectChoices[0], ["Continue planning", "Write plan to file"]);
-  assert.ok(notifications.some((n) => n.message.includes("missing a 'Plan:' header")));
+  assert.ok(notifications.some((n) => n.message.includes("missing a '# Plan' header")));
 });
 
 test("a valid plan clears the format warning so corrections stay one per streak", async () => {
@@ -857,7 +886,7 @@ test("a valid plan clears the format warning so corrections stay one per streak"
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
   await callHandler(
@@ -870,7 +899,7 @@ test("a valid plan clears the format warning so corrections stay one per streak"
   assert.equal(pi.sentMessages.length, 2);
   assert.equal(pi.sentMessages[1]?.message.customType, "plan-mode-plan-format");
   assert.deepEqual(lastEntryData(pi).todos, [
-    { step: 1, text: "First step here", completed: false },
+    { step: 1, text: "src/a.ts: first purpose", completed: false },
   ]);
 });
 
@@ -887,7 +916,31 @@ test("the Execute plan option appears only when a plan parsed", async () => {
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
+    ctx,
+  );
+  assert.deepEqual(selectChoices[1], ["Continue planning", "Write plan to file", "Execute plan"]);
+});
+
+test("Execute plan stays hidden while questions are open and appears after folding", async () => {
+  const { pi } = createExtension();
+  const { ctx, selectChoices } = createFakeCtx({
+    selectResponses: ["Continue planning", "Continue planning"],
+  });
+  await pi.commands["plan"]?.handler(undefined, ctx);
+
+  await callHandler(
+    pi,
+    "agent_end",
+    { messages: [assistantMessage([textBlock(PLAN_WITH_QUESTIONS)])] },
+    ctx,
+  );
+  assert.deepEqual(selectChoices[0], ["Continue planning", "Write plan to file"]);
+
+  await callHandler(
+    pi,
+    "agent_end",
+    { messages: [assistantMessage([textBlock(PLAN_TWO_STEPS)])] },
     ctx,
   );
   assert.deepEqual(selectChoices[1], ["Continue planning", "Write plan to file", "Execute plan"]);
@@ -904,7 +957,7 @@ test("blank input at Write plan to file falls back to the default name", async (
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
 
@@ -930,7 +983,7 @@ test("a cancelled next-action select keeps overview unchanged", async () => {
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
 
@@ -953,7 +1006,7 @@ test("reuses a locked plan file name without re-prompting on Write plan to file"
   await callHandler(
     pi,
     "agent_end",
-    { messages: [assistantMessage([textBlock("Plan:\n1. First step here")])] },
+    { messages: [assistantMessage([textBlock(PLAN_ONE_STEP)])] },
     ctx,
   );
 
@@ -965,7 +1018,7 @@ test("reuses a locked plan file name without re-prompting on Write plan to file"
 // The plan file is the source of truth: the chat message is never
 // consulted, so a reply without a Plan: header cannot trigger a correction.
 
-const planFilePlan = "Plan:\n1. First step here";
+const planFilePlan = PLAN_ONE_STEP;
 
 const seededPlanFile = (): { pi: FakePi } =>
   createExtension(["/virtual/cwd/plan.md"], { "/virtual/cwd/plan.md": planFilePlan });
@@ -990,7 +1043,7 @@ test("Execute the plan from plan-file starts execution", async () => {
   assert.equal(pi.sentMessages.length, 2);
   assert.equal(pi.sentMessages[1]?.message.customType, "plan-mode-execute");
   assert.equal(pi.sentUserMessages.length, 1);
-  assert.match(pi.sentUserMessages[0]?.text ?? "", /Start with: First step here/);
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Start with: src\/a\.ts: first purpose/);
   assert.equal(lastEntryData(pi).phase, "executing");
 });
 
@@ -1141,7 +1194,31 @@ test("an unparseable plan file names the exact format problem", async () => {
   assert.equal(selectConsumed(), 0);
   assert.equal(pi.sentMessages.length, 1);
   assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-plan-format");
-  assert.match(pi.sentMessages[0]?.message.content ?? "", /missing a 'Plan:' header/);
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /missing a '# Plan' header/);
+});
+
+test("a plan file with open questions asks for a correction", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"], {
+    "/virtual/cwd/plan.md": PLAN_WITH_QUESTIONS,
+  });
+  const entries = planFileEntries();
+  const { ctx, selectConsumed } = createFakeCtx({
+    entries,
+    selectResponses: ["Execute the plan"],
+  });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(
+    pi,
+    "agent_end",
+    { messages: [assistantMessage([textBlock("the file is written")])] },
+    ctx,
+  );
+
+  assert.equal(selectConsumed(), 0);
+  assert.equal(pi.sentMessages.length, 1);
+  assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-plan-format");
+  assert.match(pi.sentMessages[0]?.message.content ?? "", /## Questions/);
 });
 
 test("keeps old todos and corrects when the plan file is blank", async () => {
@@ -1226,7 +1303,7 @@ test("injects the plan-file context while in plan-file", async () => {
 
 test("injects nothing once the plan file parses", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"], {
-    "/virtual/cwd/plan.md": "Plan:\n1. First step here",
+    "/virtual/cwd/plan.md": PLAN_ONE_STEP,
   });
   const entries = [
     customEntry("plan-mode", { phase: "plan-file", todos: [], planFileName: "plan.md" }),
@@ -1272,6 +1349,8 @@ test("injects the execution context while executing with unfinished steps only",
     message: { customType: string; content: string };
   };
   assert.equal(result.message.customType, "plan-mode-execution-context");
+  assert.match(result.message.content, /Completed: 1\/2/);
+  assert.match(result.message.content, /Next: step 2 - b/);
   assert.doesNotMatch(result.message.content, /1\. a/);
   assert.match(result.message.content, /2\. b/);
 });
@@ -1584,6 +1663,127 @@ test("persists at turn end even without DONE markers", async () => {
   await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("no markers")]) }, ctx);
 
   assert.equal(pi.entries.length, entryCount + 1);
+});
+
+// --- todo window ---
+
+const windowTodos = (): Array<{ step: number; text: string; completed: boolean }> => [
+  { step: 1, text: "one", completed: false },
+  { step: 2, text: "two", completed: false },
+  { step: 3, text: "three", completed: false },
+  { step: 4, text: "four", completed: false },
+  { step: 5, text: "five", completed: false },
+  { step: 6, text: "six", completed: false },
+];
+
+test("the todo widget shows at most four pending steps", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", { phase: "executing", todos: windowTodos(), planFileName: "plan.md" }),
+  ];
+  const { ctx, widgetUpdates } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  assert.deepEqual(widgetUpdates.at(-1), ["[ ] one", "[ ] two", "[ ] three", "[ ] four"]);
+});
+
+test("one completed step stays visible in the window", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", { phase: "executing", todos: windowTodos(), planFileName: "plan.md" }),
+  ];
+  const { ctx, widgetUpdates } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("[DONE:1]")]) }, ctx);
+
+  assert.deepEqual(widgetUpdates.at(-1), ["[x] one", "[ ] two", "[ ] three", "[ ] four"]);
+});
+
+test("two completed steps batch-drop and refill the window", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", { phase: "executing", todos: windowTodos(), planFileName: "plan.md" }),
+  ];
+  const { ctx, widgetUpdates } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(
+    pi,
+    "turn_end",
+    { message: assistantMessage([textBlock("[DONE:1] [DONE:2]")]) },
+    ctx,
+  );
+
+  assert.deepEqual(widgetUpdates.at(-1), ["[ ] three", "[ ] four", "[ ] five", "[ ] six"]);
+});
+
+// --- nudge ---
+
+const executingEntries = (): FakeEntry[] => [
+  customEntry("plan-mode", {
+    phase: "executing",
+    todos: [{ step: 1, text: "one", completed: false }],
+    planFileName: "plan.md",
+  }),
+];
+
+const writeCall = (ctx: unknown, pi: FakePi): Promise<unknown> =>
+  callHandler(pi, "tool_call", { toolName: "write", input: { path: "x.md", content: "x" } }, ctx);
+
+test("nudges when a turn wrote but tagged nothing", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const { ctx } = createFakeCtx({ entries: executingEntries() });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await writeCall(ctx, pi);
+  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("did work")]) }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 1);
+  assert.deepEqual(pi.sentUserMessages[0]?.options, { deliverAs: "followUp" });
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /PROGRESS CHECK/);
+});
+
+test("does not nudge when the turn tagged a step", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const { ctx } = createFakeCtx({ entries: executingEntries() });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await writeCall(ctx, pi);
+  await callHandler(
+    pi,
+    "turn_end",
+    { message: assistantMessage([textBlock("done [DONE:1]")]) },
+    ctx,
+  );
+
+  assert.equal(pi.sentUserMessages.length, 0);
+});
+
+test("does not nudge when the turn made no write calls", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const { ctx } = createFakeCtx({ entries: executingEntries() });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("read only")]) }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 0);
+});
+
+test("never nudges two turns in a row", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const { ctx } = createFakeCtx({ entries: executingEntries() });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await writeCall(ctx, pi);
+  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("work")]) }, ctx);
+  await writeCall(ctx, pi);
+  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("more work")]) }, ctx);
+  assert.equal(pi.sentUserMessages.length, 1);
+
+  await writeCall(ctx, pi);
+  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("again")]) }, ctx);
+  assert.equal(pi.sentUserMessages.length, 2);
 });
 
 // --- session_start restore ---

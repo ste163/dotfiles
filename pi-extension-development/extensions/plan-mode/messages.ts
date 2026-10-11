@@ -6,6 +6,24 @@ interface CustomMessage {
   display: boolean;
 }
 
+// The plan shape is the code proposal format: a "# Plan" header wrapping
+// "## Reasoning", "## Files", "## Implementation" ("### path" blocks), and
+// an optional "## Questions" section. This text is the template the model
+// fills out, kept in sync with .pi/APPEND_SYSTEM.md.
+export const PLAN_TEMPLATE_TEXT = `# Plan
+## Reasoning
+- terse why: approach, key decisions, tradeoffs, assumptions.
+- surface the decision points first.
+
+## Files
+- repo-root-relative paths, one per line, annotated (new), (modify), or (delete), each with a terse one-line purpose.
+
+## Implementation
+One pseudo-code block per file, headed ### <path>.
+
+## Questions
+Only if anything is genuinely ambiguous. Omit the section when nothing needs asking. Number each question so the user can reply by number. Say "Proposed solution" under a question when you have one.`;
+
 export const overviewContextMessage: CustomMessage = {
   customType: "plan-mode-overview-context",
   content: `[PLAN MODE ACTIVE]
@@ -15,8 +33,11 @@ Do this:
 - Ask clarifying questions about the task before proposing a plan.
 - Study the code as much as you need with read-only tools and commands.
 - Present options and tradeoffs when the approach is not obvious.
-- Write one action per step. Split steps that end at different times.
-- End with a numbered plan under a "Plan:" header, as the final section of your response. Put nothing after the numbered steps.
+- End with the plan as the final section of your response, in exactly this shape, with nothing after it:
+
+${PLAN_TEMPLATE_TEXT}
+
+After the user answers a question, fold the answer into the Reasoning section and re-emit the full plan. After any correction or redirect, re-emit the full plan updated to match.
 
 Do NOT write or edit any file. Do NOT attempt any change. Wait for the user to continue planning, write the plan to a file, or execute it.`,
   display: false,
@@ -25,40 +46,50 @@ Do NOT write or edit any file. Do NOT attempt any change. Wait for the user to c
 export const planFileContextMessage = (planFileName: string): CustomMessage => ({
   customType: "plan-mode-file-context",
   content: `[PLAN MODE ACTIVE - WRITE PLAN FILE]
-The plan file ${planFileName} is not written yet. Write the approved plan into it now as a numbered plan under a "Plan:" header. Ask no questions. Stop when the file is written.
+The plan file ${planFileName} is not written yet. Write the approved plan into it now as the final content:
+
+${PLAN_TEMPLATE_TEXT}
+
+Fold every answered question into the Reasoning section. Do not include a Questions section in the file. Ask no questions. Stop when the file is written.
 
 The only file you may write or edit is ${planFileName}. Do NOT make other changes.`,
   display: false,
 });
 
-export const executionContextMessage = (todos: TodoItem[]): CustomMessage => ({
-  customType: "plan-mode-execution-context",
-  content: `[EXECUTING PLAN - Full tool access enabled]
+export const executionContextMessage = (todos: TodoItem[]): CustomMessage => {
+  const completed = todos.filter((t) => t.completed).length;
+  const next = todos.find((t) => !t.completed);
+  const nextLine = next ? `Next: step ${next.step} - ${next.text}` : "All steps completed.";
+  const remaining = todos.flatMap((t) => (t.completed ? [] : [`${t.step}. ${t.text}`])).join("\n");
+  return {
+    customType: "plan-mode-execution-context",
+    content: `[EXECUTING PLAN - Full tool access enabled]
+
+Completed: ${completed}/${todos.length}.
+${nextLine}
 
 Remaining steps:
-${todos.flatMap((t) => (t.completed ? [] : [`${t.step}. ${t.text}`])).join("\n")}
+${remaining}
 
 Execute each step in order.
 
 Step rules:
 - A step is complete only when its signal arrived in this turn: a tool result, a command output, or a user message. Background events are not signals.
 - Mark exactly one [DONE:n] tag per step, in the same turn that completes it.
-- Never batch tags, never pre-claim a step, never tag in a later turn.`,
-  display: false,
-});
+- Never batch tags, never pre-claim a step.
+- Never tag in a later turn, except to repair a forgotten tag when the extension asks.`,
+    display: false,
+  };
+};
 
 export const formatCorrectionMessage = (issue: string): CustomMessage => ({
   customType: "plan-mode-plan-format",
   content: `[PLAN MODE ACTIVE]
 Your last response did not parse as a plan: ${issue}.
 
-End your response with the plan in exactly this format, as the final section:
+End your response with the plan as the final section, in exactly this shape, with nothing after it:
 
-Plan:
-1. First step description
-2. Second step description
-
-Use a "Plan:" header line and numbered steps only. Put nothing after the numbered steps.`,
+${PLAN_TEMPLATE_TEXT}`,
   display: true,
 });
 
@@ -67,13 +98,11 @@ export const planFileCorrectionMessage = (issue: string, planFileName: string): 
   content: `[PLAN MODE ACTIVE]
 The plan file ${planFileName} has no valid plan: ${issue}.
 
-Write the plan into ${planFileName} in exactly this format:
+Write the plan into ${planFileName} as the final content:
 
-Plan:
-1. First step description
-2. Second step description
+${PLAN_TEMPLATE_TEXT}
 
-Use a "Plan:" header line and numbered steps only. Put nothing after the numbered steps.`,
+Fold every answered question into the Reasoning section. Do not include a Questions section in the file.`,
   display: true,
 });
 
@@ -87,7 +116,11 @@ export const todoListMessage = (todos: TodoItem[]): CustomMessage => ({
 
 export const writePlanFileMessage = (planFileName: string, todos: TodoItem[]): CustomMessage => ({
   customType: "plan-mode-write-file",
-  content: `${planFileName} was created blank on disk. Write the approved plan into it now as a numbered plan under a "Plan:" header. Ask no questions. Stop when the file is written.
+  content: `${planFileName} was created blank on disk. Write the approved plan into it now as the final content:
+
+${PLAN_TEMPLATE_TEXT}
+
+Fold every answered question into the Reasoning section. Do not include a Questions section in the file. Ask no questions. Stop when the file is written.
 
 ${
   todos.length > 0
@@ -100,6 +133,9 @@ ${
 export const executeText = (todos: TodoItem[], first: string): string =>
   `Execute the plan.
 
+Completed: 0/${todos.length}.
+Next: step 1 - ${first}
+
 Remaining steps:
 ${todos.map((t) => `${t.step}. ${t.text}`).join("\n")}
 
@@ -108,7 +144,8 @@ Start with: ${first}
 Step rules:
 - A step is complete only when its signal arrived in this turn: a tool result, a command output, or a user message. Background events are not signals.
 - Mark exactly one [DONE:n] tag per step, in the same turn that completes it.
-- Never batch tags, never pre-claim a step, never tag in a later turn.`;
+- Never batch tags, never pre-claim a step.
+- Never tag in a later turn, except to repair a forgotten tag when the extension asks.`;
 
 export const executeMessage = (todos: TodoItem[], first: string): CustomMessage => ({
   customType: "plan-mode-execute",
@@ -121,6 +158,16 @@ Start with: ${first}
 After completing a step, include a [DONE:n] tag in your response.`,
   display: true,
 });
+
+// Sent as a user message after a turn that wrote but tagged nothing. The
+// repair tag is allowed only here, so the model never batches old tags.
+export const nudgeText = `[PLAN MODE - PROGRESS CHECK]
+Your last turn used write or edit tools but included no [DONE:n] tag. Did a plan step complete in that turn?
+
+- If yes, reply with exactly one [DONE:n] tag for each step that completed.
+- If no step completed, reply that none completed.
+
+Do not redo any work; this is a progress check only.`;
 
 export const completeMessage = (todos: TodoItem[]): CustomMessage => ({
   customType: "plan-mode-complete",

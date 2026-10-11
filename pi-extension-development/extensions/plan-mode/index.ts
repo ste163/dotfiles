@@ -30,6 +30,7 @@ import {
   executeMessage,
   executeText,
   formatCorrectionMessage,
+  nudgeText,
   overviewContextMessage,
   planFileContextMessage,
   planFileCorrectionMessage,
@@ -38,7 +39,9 @@ import {
 } from "./messages.ts";
 import {
   DEFAULT_PLAN_FILE_NAME,
+  extractDoneSteps,
   extractTodoItems,
+  hasOpenQuestions,
   isSafeCommand,
   markCompletedSteps,
   planFormatIssue,
@@ -50,6 +53,13 @@ import {
 type Phase = "off" | "overview" | "plan-file" | "executing";
 
 const WRITE_TOOL_NAMES: readonly string[] = ["write", "edit"];
+
+// The todo widget shows a sliding window: up to TODO_WINDOW_SIZE pending
+// steps, and once TODO_WINDOW_DROP_AFTER of them complete, the completed
+// ones drop off and the next pending steps slide in. Display only: the
+// model still gets the full list in the execution context.
+const TODO_WINDOW_SIZE = 4;
+const TODO_WINDOW_DROP_AFTER = 2;
 
 /** Display and trigger artifacts; they never enter the model's context. */
 const DROPPED_TYPES: readonly string[] = [
@@ -81,6 +91,12 @@ interface PlanModeState {
   statusWidget: { invalidate(): void } | null;
   /** True after a format-correction turn was sent; cleared by a valid plan. */
   formatWarned: boolean;
+  /** Write/edit tool calls in the current turn; reset at each turn start. */
+  turnWriteCalls: number;
+  /** Skip the next nudge, so nudges never fire two turns in a row. */
+  nudgeCooldown: boolean;
+  /** Todo window start index for the sliding widget; UI only. */
+  todoWindowStart: number;
 }
 
 interface PersistedState {
@@ -96,6 +112,9 @@ const createState = (): PlanModeState => ({
   toolsBeforeOverview: null,
   statusWidget: null,
   formatWarned: false,
+  turnWriteCalls: 0,
+  nudgeCooldown: false,
+  todoWindowStart: 0,
 });
 
 const isAssistantMessage = (message: AgentMessage): message is AssistantMessage =>
@@ -121,8 +140,11 @@ const planFileIssue = (state: PlanModeState, content: string | null): string => 
   const lockedName = state.planFileName as string;
   if (content === null) return `${lockedName} is missing`;
   if (content.trim() === "") return `${lockedName} is blank`;
-  // SAFETY: non-empty content that extracted nothing, so planFormatIssue
-  // names the exact problem instead of returning null.
+  if (hasOpenQuestions(content)) {
+    return `${lockedName} still has a '## Questions' section - fold the answers into Reasoning and remove it`;
+  }
+  // SAFETY: non-empty content without questions that extracted nothing, so
+  // planFormatIssue names the exact problem instead of returning null.
   return planFormatIssue(content) as string;
 };
 
@@ -187,12 +209,24 @@ export const createPlanModeExtension = (
 
   const updateStatus = (ctx: ExtensionContext): void => {
     if (state.phase === "executing" && state.todos.length > 0) {
-      const lines = state.todos.map((item) =>
-        item.completed
-          ? ctx.ui.theme.fg("success", "[x] ") +
-            ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
-          : `${ctx.ui.theme.fg("muted", "[ ] ")}${item.text}`,
-      );
+      let windowStart = Math.min(state.todoWindowStart, state.todos.length);
+      const visible = state.todos.slice(windowStart, windowStart + TODO_WINDOW_SIZE);
+      const completedInWindow = visible.filter((item) => item.completed).length;
+      if (completedInWindow >= TODO_WINDOW_DROP_AFTER) {
+        const firstPending = state.todos.findIndex(
+          (item, index) => index >= windowStart && !item.completed,
+        );
+        windowStart = firstPending === -1 ? windowStart : firstPending;
+        state.todoWindowStart = windowStart;
+      }
+      const lines = state.todos
+        .slice(windowStart, windowStart + TODO_WINDOW_SIZE)
+        .map((item) =>
+          item.completed
+            ? ctx.ui.theme.fg("success", "[x] ") +
+              ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
+            : `${ctx.ui.theme.fg("muted", "[ ] ")}${item.text}`,
+        );
       ctx.ui.setWidget("plan-todos", lines);
     } else {
       ctx.ui.setWidget("plan-todos", undefined);
@@ -213,6 +247,7 @@ export const createPlanModeExtension = (
     const first = (state.todos[0] as TodoItem).text;
 
     state.phase = "executing";
+    state.todoWindowStart = 0;
     updateStatus(ctx);
     persistState();
 
@@ -268,6 +303,7 @@ export const createPlanModeExtension = (
       enterOverview();
       state.phase = "overview";
       state.todos = [];
+      state.todoWindowStart = 0;
       ctx.ui.notify(
         "Plan mode enabled (overview). Write and edit tools are disabled. Discuss the plan first.",
       );
@@ -275,6 +311,7 @@ export const createPlanModeExtension = (
       if (state.phase === "overview") leaveOverview();
       state.phase = "off";
       state.todos = [];
+      state.todoWindowStart = 0;
       ctx.ui.notify("Plan mode disabled. Full access restored.");
     }
     updateStatus(ctx);
@@ -298,6 +335,16 @@ export const createPlanModeExtension = (
   });
 
   pi.on("tool_call", (event) => {
+    // Nudge tracking: during execution, write and edit calls are the
+    // signal that a step may have completed without its tag.
+    if (
+      state.phase === "executing" &&
+      (isToolCallEventType("write", event) || isToolCallEventType("edit", event))
+    ) {
+      state.turnWriteCalls += 1;
+      return;
+    }
+
     if (state.phase === "off" || state.phase === "executing") return;
 
     if (event.toolName === "bash") {
@@ -386,6 +433,7 @@ export const createPlanModeExtension = (
   });
 
   pi.on("before_agent_start", () => {
+    state.turnWriteCalls = 0;
     if (state.phase === "overview") {
       return { message: overviewContextMessage };
     }
@@ -413,12 +461,25 @@ export const createPlanModeExtension = (
     if (state.phase !== "executing" || state.todos.length === 0) return;
     if (!isAssistantMessage(event.message)) return;
 
-    const result = markCompletedSteps(getTextContent(event.message), state.todos);
+    const text = getTextContent(event.message);
+    const result = markCompletedSteps(text, state.todos);
     if (result.completed > 0) {
       state.todos = result.todos;
       updateStatus(ctx);
     }
     persistState();
+
+    // Nudge: a turn that wrote but tagged nothing may have completed a
+    // step and forgotten the tag. One nudge per miss, never two turns in
+    // a row, and the repair tag is allowed only when the nudge asks.
+    const taggedThisTurn = extractDoneSteps(text).length > 0;
+    const pending = state.todos.some((item) => !item.completed);
+    if (taggedThisTurn || state.nudgeCooldown) {
+      state.nudgeCooldown = false;
+    } else if (pending && state.turnWriteCalls > 0) {
+      state.nudgeCooldown = true;
+      pi.sendUserMessage(nudgeText, { deliverAs: "followUp" });
+    }
   });
 
   pi.on("agent_end", async (event, ctx) => {
@@ -440,8 +501,9 @@ export const createPlanModeExtension = (
     // so its reply can be anything without triggering a correction.
     if (state.phase === "plan-file") {
       const content = planFileContent(state, deps);
+      const openQuestions = content !== null && hasOpenQuestions(content);
       const extracted = content === null ? [] : extractTodoItems(content);
-      if (extracted.length > 0) {
+      if (extracted.length > 0 && !openQuestions) {
         state.todos = extracted;
         state.formatWarned = false;
       } else {
@@ -484,6 +546,7 @@ export const createPlanModeExtension = (
     }
 
     // overview phase: extraction reads the assistant message.
+    let openQuestions = false;
     const lastAssistant = event.messages.findLast(isAssistantMessage);
     if (lastAssistant) {
       const text = getTextContent(lastAssistant);
@@ -491,6 +554,7 @@ export const createPlanModeExtension = (
       if (extracted.length > 0) {
         state.todos = extracted;
         state.formatWarned = false;
+        openQuestions = hasOpenQuestions(text);
       } else {
         // SAFETY: extraction is empty, so planFormatIssue names a problem.
         const issue = planFormatIssue(text) as string;
@@ -512,7 +576,10 @@ export const createPlanModeExtension = (
     persistState();
 
     const baseChoices = ["Continue planning", "Write plan to file"];
-    const choices = state.todos.length > 0 ? [...baseChoices, "Execute plan"] : baseChoices;
+    // Execute appears only when a plan parsed and no questions are open:
+    // the user answers them first and the model folds the answers back.
+    const choices =
+      state.todos.length > 0 && !openQuestions ? [...baseChoices, "Execute plan"] : baseChoices;
     const choice = await ctx.ui.select("Plan mode - what next?", choices);
 
     if (choice === "Write plan to file") {

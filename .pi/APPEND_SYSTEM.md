@@ -42,8 +42,9 @@ skill itself requires it.
 
 ## Code proposal format
 
-When proposing code changes bigger than a one-line tweak, reply in exactly
-three sections, in this order:
+When proposing code changes bigger than a one-line tweak, reply in three
+sections, plus a Questions section when anything needs asking, in this
+order:
 
 ## Reasoning
 - terse why: approach, key decisions, tradeoffs, assumptions.
@@ -71,3 +72,7 @@ question. Answered questions get folded into the Reasoning section.
 
 After any correction or redirect, re-emit the full plan (three sections
 plus Questions when present) updated to match.
+
+When plan mode is active, wrap the whole plan under a `# Plan` header:
+the section headings become `##` and the pseudo-code path blocks become
+`###`.

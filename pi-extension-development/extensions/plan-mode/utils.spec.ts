@@ -1,10 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
-  cleanStepText,
   DEFAULT_PLAN_FILE_NAME,
   extractDoneSteps,
   extractTodoItems,
+  hasOpenQuestions,
   isSafeCommand,
   markCompletedSteps,
   planFormatIssue,
@@ -12,6 +12,29 @@ import {
   type TodoItem,
   withMdExt,
 } from "./utils.ts";
+
+const VALID_PLAN = `# Plan
+## Reasoning
+- change the parser.
+
+## Files
+- src/parser.ts (modify) — parse the four sections
+- src/widget.ts (new) — render the todo window
+
+## Implementation
+### src/parser.ts
+extractTodoItems: read the sections.
+
+### src/widget.ts
+renderWindow: slice the list.`;
+
+const PLAN_WITH_QUESTIONS = `${VALID_PLAN}
+## Questions
+1. window size?
+   Proposed solution: 4
+2. drop threshold?
+   Proposed solution: 2
+`;
 
 test("isSafeCommand", async (t) => {
   await t.test("allows read-only allowlisted commands", () => {
@@ -59,122 +82,163 @@ test("isSafeCommand", async (t) => {
   });
 });
 
-test("cleanStepText", async (t) => {
-  await t.test("strips markdown emphasis and code spans", () => {
-    assert.equal(cleanStepText("**Run** the `build` script"), "Build script");
-  });
-
-  await t.test("strips leading action verbs", () => {
-    assert.equal(cleanStepText("Create the new file"), "New file");
-  });
-
-  await t.test("collapses whitespace and capitalizes", () => {
-    assert.equal(cleanStepText("  multiple   spaces  "), "Multiple spaces");
-  });
-
-  await t.test("returns an empty string for empty input", () => {
-    assert.equal(cleanStepText(""), "");
-  });
-
-  await t.test("keeps long step text in full", () => {
-    const long = `A ${"word ".repeat(30)}step`;
-    assert.equal(cleanStepText(long), long);
-    assert.ok(long.length > 50);
-  });
-});
-
 test("extractTodoItems", async (t) => {
-  await t.test("returns empty array when there is no Plan: header", () => {
+  await t.test("returns an empty array when there is no Plan header", () => {
     assert.deepEqual(extractTodoItems("just some text"), []);
   });
 
-  await t.test("extracts numbered steps under a Plan: header", () => {
-    const message = "Plan:\n1. First step here\n2. Second step here\n3. Third step here";
-    const items = extractTodoItems(message);
-    assert.equal(items.length, 3);
-    assert.equal(items[0]?.step, 1);
-    assert.equal(items[0]?.text, "First step here");
-    assert.equal(items[0]?.completed, false);
-  });
-
-  await t.test("accepts a markdown heading header", () => {
-    assert.deepEqual(extractTodoItems("## Plan\n1. First step here"), [
-      { step: 1, text: "First step here", completed: false },
+  await t.test("extracts steps from the Files section labeled path: purpose", () => {
+    const items = extractTodoItems(VALID_PLAN);
+    assert.deepEqual(items, [
+      { step: 1, text: "src/parser.ts: parse the four sections", completed: false },
+      { step: 2, text: "src/widget.ts: render the todo window", completed: false },
     ]);
   });
 
-  await t.test("accepts a bold header", () => {
-    assert.deepEqual(extractTodoItems("**Plan:**\n1. First step here"), [
-      { step: 1, text: "First step here", completed: false },
+  await t.test("returns an empty array when the Files section is missing", () => {
+    assert.deepEqual(
+      extractTodoItems("# Plan\n## Reasoning\n- nothing\n## Implementation\n### src/a.ts\nx"),
+      [],
+    );
+  });
+
+  await t.test("accepts tolerant Plan headers", () => {
+    const tolerant = `**Plan:**\n## Reasoning\n- why\n## Files\n- src/a.ts (modify) — purpose\n## Implementation\n### src/a.ts\nx`;
+    assert.deepEqual(extractTodoItems(tolerant), [
+      { step: 1, text: "src/a.ts: purpose", completed: false },
     ]);
   });
 
-  await t.test("accepts a header without a colon", () => {
-    assert.deepEqual(extractTodoItems("Plan\n1. First step here"), [
-      { step: 1, text: "First step here", completed: false },
+  await t.test("accepts any section heading level", () => {
+    const leveled = `# Plan\n# Reasoning\n- why\n### Files\n- src/a.ts (modify) — purpose\n## Implementation\n#### src/a.ts\nx`;
+    assert.deepEqual(extractTodoItems(leveled), [
+      { step: 1, text: "src/a.ts: purpose", completed: false },
     ]);
   });
 
-  await t.test("accepts a step ending in a closing paren", () => {
-    assert.deepEqual(extractTodoItems("Plan:\n1) First step here"), [
-      { step: 1, text: "First step here", completed: false },
+  await t.test("accepts a Files entry without an annotation", () => {
+    const bare = `# Plan\n## Reasoning\n- why\n## Files\n- src/a.ts — purpose\n## Implementation\n### src/a.ts\nx`;
+    assert.deepEqual(extractTodoItems(bare), [
+      { step: 1, text: "src/a.ts: purpose", completed: false },
     ]);
   });
 
-  await t.test("keeps bold in the middle of a step line", () => {
-    assert.deepEqual(extractTodoItems("Plan:\n1. Keep **bold** words here"), [
-      { step: 1, text: "Keep bold words here", completed: false },
+  await t.test("uses the path alone when the entry has no purpose", () => {
+    const bare = `# Plan\n## Reasoning\n- why\n## Files\n- src/a.ts\n## Implementation\n### src/a.ts\nx`;
+    assert.deepEqual(extractTodoItems(bare), [{ step: 1, text: "src/a.ts", completed: false }]);
+  });
+
+  await t.test("accepts a colon separator for the purpose", () => {
+    const colon = `# Plan\n## Reasoning\n- why\n## Files\n- src/a.ts (new): fresh purpose\n## Implementation\n### src/a.ts\nx`;
+    assert.deepEqual(extractTodoItems(colon), [
+      { step: 1, text: "src/a.ts: fresh purpose", completed: false },
     ]);
   });
 
-  await t.test("keeps a fully bold step", () => {
-    assert.deepEqual(extractTodoItems("Plan:\n1. **Do the thing**"), [
-      { step: 1, text: "Do the thing", completed: false },
+  await t.test("accepts a leading list bullet on Files entries", () => {
+    const bullet = `# Plan\n## Reasoning\n- why\n## Files\n- - src/a.ts (modify) — purpose\n## Implementation\n### src/a.ts\nx`;
+    assert.deepEqual(extractTodoItems(bullet), [
+      { step: 1, text: "src/a.ts: purpose", completed: false },
     ]);
   });
 
-  await t.test("ignores short or non-step lines", () => {
-    const message =
-      "Plan:\n1. ok\n2. `code span line`\n3. - dash line\n4. A real actionable step\n5. Run the x";
-    const items = extractTodoItems(message);
-    assert.equal(items.length, 1);
-    assert.equal(items[0]?.text, "A real actionable step");
+  await t.test("ignores prose lines inside the Files section", () => {
+    const prose = `# Plan\n## Reasoning\n- why\n## Files\nHere are the changes:\n- src/a.ts (modify) — purpose\n## Implementation\n### src/a.ts\nx`;
+    assert.deepEqual(extractTodoItems(prose), [
+      { step: 1, text: "src/a.ts: purpose", completed: false },
+    ]);
   });
 
-  await t.test("drops steps that clean down to three characters or fewer", () => {
-    const items = extractTodoItems("Plan:\n1. Run the x\n2. A real step here");
-    assert.deepEqual(items, [{ step: 1, text: "A real step here", completed: false }]);
+  await t.test("keeps hyphens inside paths intact", () => {
+    const hyphen = `# Plan\n## Reasoning\n- why\n## Files\n- src/my-tool.ts (modify) — hyphen purpose\n## Implementation\n### src/my-tool.ts\nx`;
+    assert.deepEqual(extractTodoItems(hyphen), [
+      { step: 1, text: "src/my-tool.ts: hyphen purpose", completed: false },
+    ]);
   });
 
-  await t.test("ignores a Plan-like line that is not a header", () => {
-    assert.deepEqual(extractTodoItems("**Plan Steps (10):**\n1. A real step here"), []);
+  await t.test("numbers steps in file order", () => {
+    const items = extractTodoItems(VALID_PLAN);
+    assert.deepEqual(
+      items.map((item) => item.step),
+      [1, 2],
+    );
   });
 });
 
 test("planFormatIssue", async (t) => {
-  await t.test("reports a missing header", () => {
+  await t.test("reports a missing Plan header", () => {
     assert.equal(
       planFormatIssue("just some text"),
-      "missing a 'Plan:' header line at the end of the response",
+      "missing a '# Plan' header line at the end of the response",
     );
   });
 
-  await t.test("reports missing numbered steps", () => {
+  await t.test("reports a missing Reasoning section", () => {
     assert.equal(
-      planFormatIssue("Plan:\nno steps here"),
-      "no numbered steps after the 'Plan:' header",
+      planFormatIssue(
+        "# Plan\n## Files\n- src/a.ts (modify) — purpose\n## Implementation\n### src/a.ts\nx",
+      ),
+      "missing a '## Reasoning' section",
     );
   });
 
-  await t.test("reports steps that fail parsing", () => {
+  await t.test("reports a missing Files section", () => {
     assert.equal(
-      planFormatIssue("Plan:\n1. ok\n2. - dash line"),
-      "numbered steps could not be parsed into plan steps",
+      planFormatIssue("# Plan\n## Reasoning\n- why\n## Implementation\n### src/a.ts\nx"),
+      "missing a '## Files' section",
+    );
+  });
+
+  await t.test("reports a missing Implementation section", () => {
+    assert.equal(
+      planFormatIssue("# Plan\n## Reasoning\n- why\n## Files\n- src/a.ts (modify) — purpose"),
+      "missing a '## Implementation' section",
+    );
+  });
+
+  await t.test("reports a Files section with no entries", () => {
+    assert.equal(
+      planFormatIssue(
+        "# Plan\n## Reasoning\n- why\n## Files\nnothing here\n## Implementation\n### src/a.ts\nx",
+      ),
+      "the '## Files' section has no file entries like 'path (modify) — purpose'",
+    );
+  });
+
+  await t.test("reports an Implementation section with no path blocks", () => {
+    assert.equal(
+      planFormatIssue(
+        "# Plan\n## Reasoning\n- why\n## Files\n- src/a.ts (modify) — purpose\n## Implementation\nno blocks here",
+      ),
+      "the '## Implementation' section has no '### path' blocks",
     );
   });
 
   await t.test("returns null for a valid plan", () => {
-    assert.equal(planFormatIssue("Plan:\n1. First step here"), null);
+    assert.equal(planFormatIssue(VALID_PLAN), null);
+  });
+
+  await t.test("returns null for a valid plan with open questions", () => {
+    assert.equal(planFormatIssue(PLAN_WITH_QUESTIONS), null);
+  });
+});
+
+test("hasOpenQuestions", async (t) => {
+  await t.test("returns true when the Questions section has numbered items", () => {
+    assert.equal(hasOpenQuestions(PLAN_WITH_QUESTIONS), true);
+  });
+
+  await t.test("returns false when the Questions section is absent", () => {
+    assert.equal(hasOpenQuestions(VALID_PLAN), false);
+  });
+
+  await t.test("returns false when the Questions section has no numbered items", () => {
+    const empty = `${VALID_PLAN}\n## Questions\nNo questions left.`;
+    assert.equal(hasOpenQuestions(empty), false);
+  });
+
+  await t.test("returns false without a Plan header", () => {
+    assert.equal(hasOpenQuestions("## Questions\n1. what?"), false);
   });
 });
 
