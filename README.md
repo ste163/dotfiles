@@ -36,7 +36,7 @@ Install the Nerd font from `fonts/`.
 brew install ghostty
 ```
 
-## tmux
+## tmux (at least v3.8)
 
 ```sh
 brew install tmux
@@ -82,7 +82,9 @@ repo, then update the pin above.
 The `codebase-memory-mcp` server is core to this setup. Ensure it's downloaded and able to run:
 <https://deusdata.github.io/codebase-memory-mcp/>
 
-Update the mcp server with `codebase-memory-mcp update`
+Update with `codebase-memory-mcp update`. Each update regenerates its pi
+integration (tool extension `cbmem.ts`, `codebase-memory` skill, and the
+AGENTS.md CBM section); those files are machine-generated and gitignored.
 
 ### Extensions
 
@@ -170,6 +172,28 @@ by this repo) — only brand-new extension directories need `install.sh` rerun.
 ```
 :lua vim.pack.del({'blink.cmp'})
 ```
+
+### Plugin pinning
+
+Every spec pins a commit sha in `version`, commented with its ref.
+
+**Update a plugin:**
+
+2. Edit `version` + comment
+3. Restart (lockfile updates; disk untouched)
+4. `:packupdate <name>` → review → `:write`
+5. Restart
+
+**Prune:** `:packdel <name>` removes disk + lockfile entry. `:packdel ++all` removes all inactive.
+
+**Fresh install:**
+
+```sh
+rm -rf ~/.local/share/nvim/site/pack/core/opt/*
+rm ~/Github/dotfiles/nvim/nvim-pack-lock.json
+```
+
+Restart — specs re-clone at their pinned shas; the lockfile rebuilds.
 
 #### Reinstall / upgrade
 

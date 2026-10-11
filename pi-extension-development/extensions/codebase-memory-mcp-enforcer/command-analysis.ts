@@ -62,38 +62,37 @@ const collapseQuoted = (segment: string): string =>
 const REDIRECT_TOKEN = /^(&|\d*)[<>]{1,2}\S*$/;
 const BARE_REDIRECT_OP = /^(&|\d*)[<>]{1,2}$/;
 
-const stripRedirections = (tokens: readonly string[]): readonly string[] => {
-  const walk = (rest: readonly string[], skipNext: boolean): readonly string[] => {
-    const token = rest[0];
-    if (token === undefined) return [];
-    if (skipNext) return walk(rest.slice(1), false);
-    if (REDIRECT_TOKEN.test(token)) return walk(rest.slice(1), BARE_REDIRECT_OP.test(token));
-    return [token, ...walk(rest.slice(1), false)];
-  };
-  return walk(tokens, false);
+const walkStrip = (rest: readonly string[], skipNext: boolean): readonly string[] => {
+  const token = rest[0];
+  if (token === undefined) return [];
+  if (skipNext) return walkStrip(rest.slice(1), false);
+  if (REDIRECT_TOKEN.test(token)) return walkStrip(rest.slice(1), BARE_REDIRECT_OP.test(token));
+  return [token, ...walkStrip(rest.slice(1), false)];
 };
+
+const stripRedirections = (tokens: readonly string[]): readonly string[] => walkStrip(tokens, false);
 
 const collapsedTokens = (segment: string): readonly string[] =>
   stripRedirections(collapseQuoted(segment).trim().split(/\s+/));
 
 const isBareNumber = (token: string): boolean => /^\d+$/.test(token);
 
+const walkPositional = (rest: readonly string[], previousWasFlag: boolean): readonly string[] => {
+  const token = rest[0];
+  if (token === undefined) return [];
+  const isFlag = token.startsWith("-");
+  const isFlagValue = previousWasFlag && isBareNumber(token);
+  const tail = walkPositional(rest.slice(1), isFlag);
+  return isFlag || isFlagValue ? tail : [token, ...tail];
+};
+
 /**
  * Positional args with flags removed. A bare number directly after a flag
  * is that flag's value (`-A 8`, `--max-count 5`), so it is removed too and
  * never masquerades as the pattern or a target.
  */
-export const positionalArgs = (tokens: readonly string[]): readonly string[] => {
-  const walk = (rest: readonly string[], previousWasFlag: boolean): readonly string[] => {
-    const token = rest[0];
-    if (token === undefined) return [];
-    const isFlag = token.startsWith("-");
-    const isFlagValue = previousWasFlag && isBareNumber(token);
-    const tail = walk(rest.slice(1), isFlag);
-    return isFlag || isFlagValue ? tail : [token, ...tail];
-  };
-  return walk(tokens, false);
-};
+export const positionalArgs = (tokens: readonly string[]): readonly string[] =>
+  walkPositional(tokens, false);
 
 const leadingWord = (text: string): string => text.trim().split(/\s+/)[0] as string;
 

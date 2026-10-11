@@ -1,7 +1,7 @@
 -- Auto formatter
 vim.pack.add({ {
 	src = "https://github.com/stevearc/conform.nvim",
-	version = "v9.1.0",
+	version = "3543d000dafbc41cc7761d860cfdb24e82154f75", -- v9.1.0
 } })
 
 require("conform").setup({

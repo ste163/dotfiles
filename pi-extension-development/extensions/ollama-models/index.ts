@@ -24,7 +24,7 @@ import type {
   ProviderConfig,
   ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
-import { assembleModels } from "./assemble.ts";
+import { assembleModels, type ProviderChatModelConfig } from "./assemble.ts";
 import { CONFIG } from "./config.ts";
 import { FETCH_TIMEOUT_MS, fetchShow, type OllamaModelsDeps } from "./ollama-api.ts";
 
@@ -47,7 +47,7 @@ const buildProviderConfig = (models: ProviderModelConfig[]): ProviderConfig => (
 
 /** What the load-time fetch produced: the registered entries and the config ids that did not make it. */
 interface CatalogOutcome {
-  models: ProviderModelConfig[];
+  models: ProviderChatModelConfig[];
   missing: readonly string[];
 }
 

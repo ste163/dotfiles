@@ -1,0 +1,13 @@
+{
+  "extends": "../pi-extension-development/tsconfig.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "typeRoots": ["../pi-extension-development/node_modules/@types"],
+    "paths": {
+      "@earendil-works/*": ["../pi-extension-development/node_modules/@earendil-works/*"]
+    }
+  },
+  "include": ["extensions/**/*.ts"],
+  "exclude": ["extensions/cbmem.ts"]
+}

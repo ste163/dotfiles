@@ -1,7 +1,7 @@
 -- File tree manager. Replacement for the builtin one (netrw)
 vim.pack.add({ {
   src = "https://github.com/nvim-tree/nvim-tree.lua",
-  version = "v1.17.0",
+  version = "531b807b8f0d6f75016a0ee1e0cd5ce2086e9d95", -- v1.18.0
 } })
 
 local function on_attach(bufnr)
@@ -40,16 +40,4 @@ require("nvim-tree").setup({
     },
   },
   on_attach = on_attach,
-})
-
--- Auto refresh/reload nvim-tree on focus (ensures commit/push state is always latest)
--- Create an augroup to prevent duplicate autocommands on reload
-local nvim_tree_group = vim.api.nvim_create_augroup("NvimTreeRefresh", { clear = true })
-
-vim.api.nvim_create_autocmd("BufEnter", {
-  group = nvim_tree_group,
-  pattern = "NvimTree_*", -- Matches the NvimTree buffer naming convention
-  callback = function()
-    require("nvim-tree.api").tree.reload()
-  end,
 })

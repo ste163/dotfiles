@@ -11,11 +11,14 @@
 import type { ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { getContextLength, type ShowResponse } from "./ollama-api.ts";
 
+/** Chat-model narrow of the public config union: `reasoning` exists only on chat entries. */
+export type ProviderChatModelConfig = Extract<ProviderModelConfig, { reasoning: boolean }>;
+
 /**
  * Explicit compatibility block so behavior does not depend on pi's
  * auto-detection from the provider name or baseUrl.
  */
-const buildCompatibility = (): ProviderModelConfig["compat"] => ({
+const buildCompatibility = (): ProviderChatModelConfig["compat"] => ({
   supportsDeveloperRole: false, // Ollama serves the "system" role, not "developer".
   supportsReasoningEffort: true, // reasoning_effort is honored through the local daemon.
   supportsStore: false,
@@ -37,7 +40,7 @@ const buildCompatibility = (): ProviderModelConfig["compat"] => ({
  * Returns an empty array when the daemon reports the model cannot serve pi
  * (no tools, no positive context length).
  */
-export const assembleModel = (modelId: string, show: ShowResponse): ProviderModelConfig[] => {
+export const assembleModel = (modelId: string, show: ShowResponse): ProviderChatModelConfig[] => {
   const capabilities = show.capabilities;
   if (!capabilities?.includes("tools")) return [];
   const contextWindow = getContextLength(show.model_info);
@@ -69,7 +72,7 @@ export const assembleModel = (modelId: string, show: ShowResponse): ProviderMode
 export const assembleModels = (
   modelIds: readonly string[],
   shows: ReadonlyMap<string, ShowResponse>,
-): ProviderModelConfig[] =>
+): ProviderChatModelConfig[] =>
   modelIds.flatMap((id) => {
     const show = shows.get(id);
     return show ? assembleModel(id, show) : [];

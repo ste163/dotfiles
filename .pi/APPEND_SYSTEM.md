@@ -39,3 +39,40 @@ Always write prose in the `caveman` skill style: terse, answer first, no
 ceremony. The full rules are in `.pi/skills/caveman/SKILL.md`.
 Chat replies only. Files, docs, code, and commits stay normal prose — the
 skill itself requires it.
+
+## Code proposal format
+
+When proposing code changes bigger than a one-line tweak, reply in three
+sections, plus a Questions section when anything needs asking, in this
+order:
+
+## Reasoning
+- terse why: approach, key decisions, tradeoffs, assumptions.
+- surface the decision points first — the user redirects here before reading
+  the rest.
+
+## Files
+- repo-root-relative paths, one per line, annotated `(new)`, `(modify)`,
+  or `(delete)`, each with a terse one-line purpose.
+
+## Implementation
+One pseudo-code block per file, headed `### <path>`:
+- named functions/symbols first, abstract pseudo-code inside the bodies.
+- sketch-level: signatures + behavior, not full code.
+
+## Questions
+Only if anything is genuinely ambiguous or needs a user decision.
+Omit the section entirely when nothing needs asking. Each item is one
+numbered line, phrased as a concrete question, so the user can reply by
+number. If there's a proposed solution, say "Proposed solution" under the
+question. Answered questions get folded into the Reasoning section.
+1. `question`?
+   Proposed solution: `solution`
+2. `question`?
+
+After any correction or redirect, re-emit the full plan (three sections
+plus Questions when present) updated to match.
+
+When plan mode is active, wrap the whole plan under a `# Plan` header:
+the section headings become `##` and the pseudo-code path blocks become
+`###`.

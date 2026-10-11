@@ -32,7 +32,7 @@ vim.keymap.set(
   { desc = "Open a terminal on the right side", silent = true }
 )
 
-vim.keymap.set("t", "<Esc>", [[<C-\><C-n>]], { noremap = true, desc = "Exit the terminal" })
+vim.keymap.set("t", "<C-g>", [[<C-\><C-n>]], { noremap = true, desc = "Exit the terminal" })
 
 vim.keymap.set("n", "<C-_>", "gcc", { remap = true, desc = "Toggle comments" })
 vim.keymap.set("v", "<C-_>", "gc", { remap = true, desc = "Toggle comments" })

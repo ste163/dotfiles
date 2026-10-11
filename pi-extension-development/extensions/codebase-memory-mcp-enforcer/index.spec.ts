@@ -28,10 +28,10 @@ const createFakePi = (): FakePi => {
   };
 };
 
-const CONFIG_PATH = "/virtual/home/.pi/agent/mcp.json";
+// The binary path the generated cbmem.ts extension spawns; its presence is
+// what "registered" means now that the mcp.json stdio entry is gone.
+const BIN_PATH = "/virtual/home/.local/bin/codebase-memory-mcp";
 const DB_PATH = "/virtual/home/.cache/codebase-memory-mcp/virtual-repo.db";
-const REGISTERED_MCP =
-  '{"mcpServers":{"codebase-memory-mcp":{"command":"codebase-memory-mcp","exposure":"direct"}}}';
 
 // Fully in-memory deps fake — no real disk I/O, no chdir, no temp dirs.
 // `existingPaths` holds the exact paths existsSync answers for; `files` holds
@@ -98,14 +98,14 @@ const DEEP_CWD =
 
 // --- Blocks ---
 
-test("blocks bash code-search with the full ladder when the server is not registered", async () => {
+test("blocks bash code-search with the full ladder when the binary is missing", async () => {
   const reason = await blocked("grep -rn foo src/", createFakeDeps(["/virtual/repo/.git"]));
   assert.ok(reason.includes("MCP FIRST"));
   assert.ok(reason.includes("`grep -rn foo src/`"));
-  assert.ok(reason.includes("1. Not connected?"));
-  assert.ok(reason.includes("`pi mcp list`"));
+  assert.ok(reason.includes("1. Not installed?"));
+  assert.ok(reason.includes("`codebase-memory-mcp --version`"));
   assert.ok(reason.includes('repo_path: "/virtual/repo", mode: "fast"'));
-  assert.ok(reason.includes("mcp__codebase_memory_mcp__list_projects"));
+  assert.ok(reason.includes("list_projects"));
   // Step 4 carries the extracted pattern even in the ladder.
   assert.ok(reason.includes('pattern: "foo", project: "<name>"'));
   assert.ok(reason.includes("Inform the user and stop this line of work"));
@@ -114,142 +114,58 @@ test("blocks bash code-search with the full ladder when the server is not regist
   assert.ok(reason.includes("Legal without the server"));
 });
 
-test("blocks with a ready-made rewrite when the server is registered and the repo is indexed", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+test("blocks with a ready-made rewrite when the binary exists and the repo is indexed", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   const reason = await blocked('grep -rn "session_start" src/', deps);
   assert.ok(reason.includes("Try instead:"));
   assert.ok(
     reason.includes(
-      'mcp__codebase_memory_mcp__search_code({ pattern: "session_start", project: "virtual-repo", mode: "files" })',
+      'search_code({ pattern: "session_start", project: "virtual-repo", mode: "files" })',
     ),
   );
   assert.ok(reason.includes("Patterns match literally"));
   assert.ok(reason.includes("`regex: true`"));
-  assert.ok(!reason.includes("Not connected?"));
-  assert.ok(!reason.includes("mcp__codebase_memory_mcp__list_projects"));
+  assert.ok(!reason.includes("Not installed?"));
+  assert.ok(!reason.includes("list_projects"));
 });
 
 test("rewrites every violating segment with its own extracted pattern", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   const reason = await blocked("rg foo && find . -name '*permission*'", deps);
   assert.ok(reason.includes('pattern: "foo"'));
   assert.ok(reason.includes('pattern: "*permission*"'));
 });
 
 test("falls back to a placeholder pattern for unbalanced quotes and patternless segments", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   // "two words" splits into an unbalanced opener, and bare rg has no pattern at all.
   const reason = await blocked('grep "two words" src/ && rg', deps);
   assert.ok(reason.includes('pattern: "...", project: "virtual-repo"'));
-  assert.ok(reason.includes("mcp__codebase_memory_mcp__search_code({"));
+  assert.ok(reason.includes("search_code({"));
 });
 
-test("falls back to the ladder when the config path exists but reads empty", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", CONFIG_PATH]);
+test("registers when the binary exists at the standard install path", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   const reason = await blocked("rg foo", deps);
-  assert.ok(reason.includes("1. Not connected?"));
+  assert.ok(reason.includes("Try instead:"));
 });
 
-test("blocks with the index-first path when the server is registered but the repo is not indexed", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+test("falls back to the ladder when the binary path exists only elsewhere", async () => {
+  const deps = createFakeDeps([
+    "/virtual/repo/.git",
+    "/virtual/home/.local/lib/codebase-memory-mcp",
+  ]);
+  const reason = await blocked("rg foo", deps);
+  assert.ok(reason.includes("1. Not installed?"));
+});
+
+test("blocks with the index-first path when the binary exists but the repo is not indexed", async () => {
+  const deps = createFakeDeps(["/virtual/repo/.git", BIN_PATH]);
   const reason = await blocked("rg foo", deps);
   assert.ok(reason.includes("Index the repo, then search:"));
   assert.ok(reason.includes('repo_path: "/virtual/repo", mode: "fast"'));
   assert.ok(!reason.includes("Try instead:"));
-  assert.ok(!reason.includes("Not connected?"));
-});
-
-test("treats a malformed or wrong-shaped mcp config as not registered, even with a db present", async () => {
-  const configs = [
-    "not json",
-    "42",
-    "null",
-    "[]",
-    "{}",
-    '{"mcpServers": []}',
-    '{"mcpServers":{"other":{}}}',
-  ];
-  // Each config gets its own fake pi, so the checks are independent of each other.
-  const results = await Promise.all(
-    configs.map(async (config) => {
-      const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-        [CONFIG_PATH]: config,
-      });
-      return { config, reason: await blocked("rg foo", deps) };
-    }),
-  );
-  for (const { config, reason } of results) {
-    assert.ok(reason.includes("1. Not connected?"), config);
-  }
-});
-
-test("registers from each built-in mcp config source", async () => {
-  const sources = ["/virtual/home/.pi/agent/mcp.json", "/virtual/repo/.pi/mcp.json"];
-  const results = await Promise.all(
-    sources.map(async (source) => {
-      const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, source], "/virtual/repo", {
-        [source]: REGISTERED_MCP,
-      });
-      return { source, reason: await blocked("rg foo", deps) };
-    }),
-  );
-  for (const { source, reason } of results) {
-    assert.ok(reason.includes("Try instead:"), source);
-  }
-});
-
-test("ignores adapter config files, which Pi's built-in MCP does not read", async () => {
-  const legacyPaths = [
-    "/virtual/home/.config/mcp/mcp.json",
-    "/virtual/home/.agents/mcp.json",
-    "/virtual/home/.agents/mcp/mcp.json",
-    "/virtual/home/.pi/agent/mcp-adapter.json",
-    "/virtual/repo/.mcp.json",
-    "/virtual/repo/.pi/mcp-adapter.json",
-  ];
-  const results = await Promise.all(
-    legacyPaths.map(async (legacyPath) => {
-      const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, legacyPath], "/virtual/repo", {
-        [legacyPath]: REGISTERED_MCP,
-      });
-      return { legacyPath, reason: await blocked("rg foo", deps) };
-    }),
-  );
-  for (const { legacyPath, reason } of results) {
-    assert.ok(reason.includes("1. Not connected?"), legacyPath);
-  }
-});
-
-test("honors PI_CODING_AGENT_DIR and ignores the default agent dir when set", async () => {
-  const customConfig = "/custom/agent/mcp.json";
-  const customDeps = createFakeDeps(
-    ["/virtual/repo/.git", DB_PATH, customConfig],
-    "/virtual/repo",
-    { [customConfig]: REGISTERED_MCP },
-    "/virtual/home",
-    {},
-    { PI_CODING_AGENT_DIR: "/custom/agent" },
-  );
-  const customReason = await blocked("rg foo", customDeps);
-  assert.ok(customReason.includes("Try instead:"));
-  const defaultOnlyDeps = createFakeDeps(
-    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH],
-    "/virtual/repo",
-    { [CONFIG_PATH]: REGISTERED_MCP },
-    "/virtual/home",
-    {},
-    { PI_CODING_AGENT_DIR: "/custom/agent" },
-  );
-  const defaultOnlyReason = await blocked("rg foo", defaultOnlyDeps);
-  assert.ok(defaultOnlyReason.includes("1. Not connected?"));
+  assert.ok(!reason.includes("Not installed?"));
 });
 
 test("blocks every violating segment of a chain and names them all", async () => {
@@ -328,22 +244,18 @@ test("blocks when the git root sits above the cwd", async () => {
 });
 
 test("adds outside-project guidance when a blocked search targets absolute paths outside the repo", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   const reason = await blocked("grep -rn foo /outside/dir", deps);
   assert.ok(reason.includes("outside the project"));
   assert.ok(reason.includes("`/outside/dir`"));
   assert.ok(reason.includes("can only search indexed repositories"));
-  assert.ok(reason.includes("mcp__codebase_memory_mcp__list_projects"));
+  assert.ok(reason.includes("list_projects"));
   const findReason = await blocked("find /outside -name x", deps);
   assert.ok(findReason.includes("`/outside`"));
 });
 
 test("omits outside-project guidance for searches inside the repo", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   const reason = await blocked("grep -rn foo /virtual/repo/src", deps);
   assert.ok(!reason.includes("outside the project"));
   const patternReason = await blocked("grep -rn /foo/bar /virtual/repo/src", deps);
@@ -366,26 +278,22 @@ test("expands ~ against the home dir when judging outside targets", async () => 
 });
 
 test("names outside targets after -e patterns", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   const reason = await blocked("grep -e foo /outside", deps);
   assert.ok(reason.includes("`/outside`"));
 });
 
 test("omits the stale note when the index db is missing", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+  const deps = createFakeDeps(["/virtual/repo/.git", BIN_PATH]);
   const reason = await blocked("grep -rn foo src/", deps);
   assert.ok(!reason.includes("changed after the last index"));
 });
 
 test("omits the stale note when substitution hides the targets or the segment is find", async () => {
   const deps = createFakeDeps(
-    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH],
+    ["/virtual/repo/.git", DB_PATH, BIN_PATH],
     "/virtual/repo",
-    { [CONFIG_PATH]: REGISTERED_MCP },
+    {},
     "/virtual/home",
     {
       [DB_PATH]: { mtimeMs: 100, isFile: true },
@@ -401,9 +309,9 @@ test("omits the stale note when substitution hides the targets or the segment is
 test("resolves ~ targets against the home dir for the stale check", async () => {
   const dbPath = "/virtual/.cache/codebase-memory-mcp/virtual-repo.db";
   const deps = createFakeDeps(
-    ["/virtual/repo/.git", dbPath, CONFIG_PATH, "/virtual/repo/src"],
+    ["/virtual/repo/.git", dbPath, BIN_PATH, "/virtual/repo/src"],
     "/virtual/repo",
-    { [CONFIG_PATH]: REGISTERED_MCP },
+    {},
     "/virtual",
     {
       [dbPath]: { mtimeMs: 100, isFile: true },
@@ -416,9 +324,9 @@ test("resolves ~ targets against the home dir for the stale check", async () => 
 
 test("omits the stale note for targets outside the git root", async () => {
   const deps = createFakeDeps(
-    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/outside/src"],
+    ["/virtual/repo/.git", DB_PATH, BIN_PATH, "/outside/src"],
     "/virtual/repo",
-    { [CONFIG_PATH]: REGISTERED_MCP },
+    {},
     "/virtual/home",
     {
       [DB_PATH]: { mtimeMs: 100, isFile: true },
@@ -431,9 +339,9 @@ test("omits the stale note for targets outside the git root", async () => {
 
 test("omits the stale note for missing files, directory targets, and unrecorded stats", async () => {
   const deps = createFakeDeps(
-    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/virtual/repo/src"],
+    ["/virtual/repo/.git", DB_PATH, BIN_PATH, "/virtual/repo/src"],
     "/virtual/repo",
-    { [CONFIG_PATH]: REGISTERED_MCP },
+    {},
     "/virtual/home",
     {
       [DB_PATH]: { mtimeMs: 100, isFile: true },
@@ -445,9 +353,9 @@ test("omits the stale note for missing files, directory targets, and unrecorded 
   const reason = await blocked("grep -rn foo src/", deps);
   assert.ok(!reason.includes("changed after the last index"));
   const unrecordedDeps = createFakeDeps(
-    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/virtual/repo/src"],
+    ["/virtual/repo/.git", DB_PATH, BIN_PATH, "/virtual/repo/src"],
     "/virtual/repo",
-    { [CONFIG_PATH]: REGISTERED_MCP },
+    {},
     "/virtual/home",
     { [DB_PATH]: { mtimeMs: 100, isFile: true } },
   );
@@ -457,9 +365,9 @@ test("omits the stale note for missing files, directory targets, and unrecorded 
 
 test("omits the stale note when the file is older than the index db", async () => {
   const deps = createFakeDeps(
-    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/virtual/repo/src"],
+    ["/virtual/repo/.git", DB_PATH, BIN_PATH, "/virtual/repo/src"],
     "/virtual/repo",
-    { [CONFIG_PATH]: REGISTERED_MCP },
+    {},
     "/virtual/home",
     {
       [DB_PATH]: { mtimeMs: 100, isFile: true },
@@ -472,9 +380,9 @@ test("omits the stale note when the file is older than the index db", async () =
 
 test("adds a stale-index note when a targeted file is newer than the index db", async () => {
   const deps = createFakeDeps(
-    ["/virtual/repo/.git", DB_PATH, CONFIG_PATH, "/virtual/repo/src"],
+    ["/virtual/repo/.git", DB_PATH, BIN_PATH, "/virtual/repo/src"],
     "/virtual/repo",
-    { [CONFIG_PATH]: REGISTERED_MCP },
+    {},
     "/virtual/home",
     {
       [DB_PATH]: { mtimeMs: 100, isFile: true },
@@ -583,18 +491,14 @@ test("handles value-taking flags when judging targets", async () => {
 });
 
 test("extracts the pattern, not a flag value, in the rewrite", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   const reason = await blocked("grep -A 8 pattern src/", deps);
   assert.ok(reason.includes('pattern: "pattern"'));
   assert.ok(!reason.includes('pattern: "8"'));
 });
 
 test("extracts the pattern from -e searches in the rewrite", async () => {
-  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-    [CONFIG_PATH]: REGISTERED_MCP,
-  });
+  const deps = createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]);
   const reason = await blocked("grep -e pattern src/", deps);
   assert.ok(reason.includes('pattern: "pattern"'));
   assert.ok(!reason.includes('pattern: "src/"'));
@@ -683,16 +587,14 @@ test("prepends the READY reminder with the decision rule when indexed", async ()
   const pi = createFakePi();
   createCodebaseMemoryMcpEnforcerExtension(
     pi as unknown as Pi,
-    createFakeDeps(["/virtual/repo/.git", DB_PATH, CONFIG_PATH], "/virtual/repo", {
-      [CONFIG_PATH]: REGISTERED_MCP,
-    }),
+    createFakeDeps(["/virtual/repo/.git", DB_PATH, BIN_PATH]),
   );
   const result = (await callHandler(pi, "before_agent_start", {
     systemPrompt: "BASE PROMPT",
   })) as { systemPrompt: string };
   assert.ok(result.systemPrompt.startsWith("MCP READY"));
   assert.ok(result.systemPrompt.includes('project "virtual-repo" is indexed'));
-  assert.ok(result.systemPrompt.includes("mcp__codebase_memory_mcp__search_code"));
+  assert.ok(result.systemPrompt.includes("search_code"));
   assert.ok(result.systemPrompt.includes("Know the path → read"));
   assert.ok(result.systemPrompt.includes("bash grep is legal"));
   assert.ok(result.systemPrompt.includes("awk/sed over files is code search"));
@@ -706,9 +608,7 @@ test("prepends the COLD reminder when registered but not indexed", async () => {
   const pi = createFakePi();
   createCodebaseMemoryMcpEnforcerExtension(
     pi as unknown as Pi,
-    createFakeDeps(["/virtual/repo/.git", CONFIG_PATH], "/virtual/repo", {
-      [CONFIG_PATH]: REGISTERED_MCP,
-    }),
+    createFakeDeps(["/virtual/repo/.git", BIN_PATH]),
   );
   const result = (await callHandler(pi, "before_agent_start", {
     systemPrompt: "BASE PROMPT",
@@ -718,7 +618,7 @@ test("prepends the COLD reminder when registered but not indexed", async () => {
   assert.ok(result.systemPrompt.includes('repo_path: "/virtual/repo", mode: "fast"'));
 });
 
-test("prepends the not-registered reminder when the server is missing", async () => {
+test("prepends the not-registered reminder when the binary is missing", async () => {
   const pi = createFakePi();
   createCodebaseMemoryMcpEnforcerExtension(
     pi as unknown as Pi,
@@ -728,7 +628,7 @@ test("prepends the not-registered reminder when the server is missing", async ()
     systemPrompt: "BASE PROMPT",
   })) as { systemPrompt: string };
   assert.ok(result.systemPrompt.startsWith("MCP FIRST"));
-  assert.ok(result.systemPrompt.includes("`pi mcp list`"));
+  assert.ok(result.systemPrompt.includes("`codebase-memory-mcp install`"));
 });
 
 test("leaves the system prompt alone outside a git repo (walk breaks at the root)", async () => {

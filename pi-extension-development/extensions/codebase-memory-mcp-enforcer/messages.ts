@@ -42,16 +42,16 @@ const searchPattern = (segment: string): string => {
 };
 
 const searchCallLine = (project: string, pattern: string): string =>
-  'mcp__codebase_memory_mcp__search_code({ pattern: "' +
+  'search_code({ pattern: "' +
   pattern +
   '", project: "' +
   project +
   '", mode: "files" })';
 
 const indexCallLine = (gitRoot: string): string =>
-  'mcp__codebase_memory_mcp__index_repository({ repo_path: "' + gitRoot + '", mode: "fast" })';
+  'index_repository({ repo_path: "' + gitRoot + '", mode: "fast" })';
 
-const listProjectsCallLine = (): string => "mcp__codebase_memory_mcp__list_projects()";
+const listProjectsCallLine = (): string => "list_projects()";
 
 const blockHeader = (violations: readonly string[]): string =>
   "MCP FIRST — code search blocked: " + violations.map((segment) => "`" + segment + "`").join(", ");
@@ -93,7 +93,7 @@ const blockBody = (
   }
   const first = violations[0] as string;
   return (
-    "1. Not connected?    Run `pi mcp list` in a shell. It must show the server connected; then restart pi.\n" +
+    "1. Not installed?    Run `codebase-memory-mcp --version` in a shell. Missing → install it (README → MCP section), then restart pi.\n" +
     "2. First time here?  " +
     indexCallLine(gitRoot) +
     "\n" +
@@ -118,13 +118,14 @@ const staleNote = (gitRoot: string, stale: readonly string[]): string =>
       indexCallLine(gitRoot);
 
 /** The block message: a ready-made rewrite when the state is readable, the ladder when it is not. */
-export const blockMessage = (
-  gitRoot: string,
-  violations: readonly string[],
-  state: McpState,
-  homeDir: string,
-  stale: readonly string[],
-): string => {
+export const blockMessage = (opts: {
+  gitRoot: string;
+  violations: readonly string[];
+  state: McpState;
+  homeDir: string;
+  stale: readonly string[];
+}): string => {
+  const { gitRoot, violations, state, homeDir, stale } = opts;
   const project = projectNameFor(gitRoot);
   const header = blockHeader(violations);
   const outside = violations.flatMap((segment) => outsideProjectTargets(segment, gitRoot, homeDir));
@@ -134,7 +135,7 @@ export const blockMessage = (
       : "\n\nNote: this search targets files outside the project (" +
         outside.map((target) => "`" + target + "`").join(", ") +
         "). codebase-memory-mcp can only search indexed repositories — check " +
-        "mcp__codebase_memory_mcp__list_projects(). " +
+        "`list_projects()`. " +
         "Use `read` for known paths, or run the search in a shell outside pi.";
   return (
     header +
@@ -175,7 +176,7 @@ export const reminderMessage = (gitRoot: string, state: McpState): string => {
     );
   }
   return (
-    "MCP FIRST — codebase-memory-mcp is not configured; code grep will block. Check the server entry in `~/.pi/agent/mcp.json` and run `pi mcp list` in a shell." +
+    "MCP FIRST — codebase-memory-mcp is not installed; code grep will block. Install it (`codebase-memory-mcp install`) and restart pi." +
     rule
   );
 };

@@ -1,0 +1,49 @@
+#!/bin/sh
+# tmux-state-restore: replay the snapshot written by tmux-state-save.
+# The state file is itself a shell script of tmux commands; running it
+# rebuilds the saved sessions. Clean no-op when no state exists yet.
+#
+# POSIX sh only: runs on macOS and Linux.
+
+# Ghostty launches commands via a bare login shell (--noprofile --norc),
+# so Homebrew binaries are missing from PATH. Normalize PATH first so tmux
+# and friends resolve on every launch path.
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export PATH
+
+SCRIPT_DIR=
+
+# Resolve this script's real path through the symlink chain. macOS has no
+# readlink -f, so walk manually; relative links resolve against dirname.
+resolve_self() {
+    SELF=$0
+    case "$SELF" in
+        */*) ;;
+        *) SELF="./$SELF" ;;
+    esac
+    while [ -L "$SELF" ]; do
+        LINK=$(readlink "$SELF")
+        case "$LINK" in
+            /*) SELF=$LINK ;;
+            *) SELF=$(dirname "$SELF")/$LINK ;;
+        esac
+    done
+    SCRIPT_DIR=$(cd "$(dirname "$SELF")" && pwd)
+}
+
+resolve_self
+STATE="$SCRIPT_DIR/state/state.txt"
+[ -f "$STATE" ] || exit 0
+
+# Guard: replaying into a live server would mutate real sessions. Restore
+# only makes sense when the server is dead.
+tmux has-session 2>/dev/null && exit 0
+
+# Marker: the replay's own commands trigger the save hooks; those saves
+# must not snapshot a half-built session. The marker holds the start epoch
+# so a stale marker (restore killed mid-replay) can be ignored by the
+# save script. Removed on exit even if the replay fails.
+date +%s > "$SCRIPT_DIR/state/restoring"
+trap 'rm -f "$SCRIPT_DIR/state/restoring"' EXIT
+
+sh "$STATE"

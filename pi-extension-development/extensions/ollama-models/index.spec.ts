@@ -162,7 +162,7 @@ test("a live catalog registers the provider; the default export does the same", 
   const models = config.models;
   assert.ok(models);
   assert.equal(models.length, CONFIG.models.length);
-  assert.ok(models.every((model) => model.contextWindow === 4096));
+    assert.ok(models.every((model) => "contextWindow" in model && model.contextWindow === 4096));
   assert.ok(handlers.has("session_start"));
   const { pi: secondPi, registrations: secondRegistrations } = createFakePi();
   await ollamaModelsExtension(secondPi, deps);
@@ -219,7 +219,7 @@ test("a partial catalog registers the survivors and warns naming the missing id"
   const models = registrations[0]?.config.models;
   assert.ok(models);
   assert.equal(models.length, CONFIG.models.length - 1);
-  assert.ok(models.every((model) => model.contextWindow === 888888));
+    assert.ok(models.every((model) => "contextWindow" in model && model.contextWindow === 888888));
   sessionStartHandler(handlers)(
     { type: "session_start", reason: "startup" },
     ctx as unknown as ExtensionContext,

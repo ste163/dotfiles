@@ -121,56 +121,108 @@ export interface TodoItem {
   completed: boolean;
 }
 
-const stripLeadingVerb = (text: string): string =>
-  text.replace(
-    /^(Use|Run|Execute|Create|Write|Read|Check|Verify|Update|Modify|Add|Remove|Delete|Install)\s+(the\s+)?/i,
-    "",
-  );
-
-const capitalize = (text: string): string =>
-  text.length > 0 ? text.charAt(0).toUpperCase() + text.slice(1) : text;
-
-export const cleanStepText = (text: string): string =>
-  capitalize(
-    stripLeadingVerb(text.replace(/\*{1,2}([^*]+)\*{1,2}/g, "$1").replace(/`([^`]+)`/g, "$1"))
-      .replace(/\s+/g, " ")
-      .trim(),
-  );
-
-const isPlanStepCandidate = (text: string): boolean =>
-  text.length > 5 && !text.startsWith("`") && !text.startsWith("/") && !text.startsWith("-");
-
-// A plan header is a line of its own: optional markdown hashes, then
-// "Plan" with an optional colon, wrapped in optional bold markers.
-// Markdown headings are natural for the model, so the parser accepts them
-// instead of demanding one exact form.
+// Plan format: a tolerant "Plan" header line, then ## sections beneath it,
+// then ### path blocks inside Implementation. Hash count, colons, and bold
+// markers are all accepted so model drift does not fail a parse. The
+// canonical shape is "# Plan" with "##" sections and "###" path blocks.
 const PLAN_HEADER_PATTERN = /^[ \t]*(?:#{1,6}[ \t]+)?\*{0,2}Plan:?\*{0,2}[ \t]*$/im;
 
-// Numbered steps capture the whole line. cleanStepText strips markdown
-// inside the text, so mid-line bold or code spans do not cut the capture
-// short the way a stop-at-first-asterisk pattern would.
-const NUMBERED_STEP_PATTERN = /^[ \t]*(\d+)[.)][ \t]+(.+?)[ \t]*$/gm;
+export type PlanSection = "Reasoning" | "Files" | "Implementation" | "Questions";
 
-const stripBoldMarkers = (text: string): string =>
-  text
-    .replace(/^\*{1,2}/, "")
-    .replace(/\*{1,2}$/, "")
-    .trim();
+// Static literals: the section names never vary at runtime.
+const SECTION_PATTERNS: Record<PlanSection, RegExp> = {
+  Reasoning: /^[ \t]*#{1,6}[ \t]+\*{0,2}Reasoning:?\*{0,2}[ \t]*$/im,
+  Files: /^[ \t]*#{1,6}[ \t]+\*{0,2}Files:?\*{0,2}[ \t]*$/im,
+  Implementation: /^[ \t]*#{1,6}[ \t]+\*{0,2}Implementation:?\*{0,2}[ \t]*$/im,
+  Questions: /^[ \t]*#{1,6}[ \t]+\*{0,2}Questions:?\*{0,2}[ \t]*$/im,
+};
 
+const NEXT_SECTION_PATTERN =
+  /^[ \t]*#{1,6}[ \t]+\*{0,2}(?:Reasoning|Files|Implementation|Questions):?\*{0,2}[ \t]*$/im;
+
+// Any heading line counts as a path block; the exact level is not checked.
+const PATH_BLOCK_PATTERN = /^[ \t]*#{1,6}[ \t]+\S/m;
+
+// Files entries: a whitespace-delimited path, an optional
+// "(new|modify|delete)" annotation, then an optional "— purpose" tail.
+// The separator is a dash or colon after whitespace, or a colon directly
+// after the annotation, so "(new): purpose" also parses. A leading list
+// bullet (or nested bullets) is tolerated.
+const PATH_PATTERN = /^\S+/;
+
+const ANNOTATION_PATTERN = /^[ \t]+\((new|modify|delete)\)/;
+
+const PURPOSE_SEPARATOR_PATTERN = /^(?:[ \t]+[—–:-]|:)[ \t]+(.+)$/;
+
+const NUMBERED_ITEM_PATTERN = /^[ \t]*\d+[.)][ \t]+/m;
+
+interface SectionMatch {
+  content: string;
+}
+
+/** Returns the text between a section heading and the next heading. */
+const findSection = (text: string, name: PlanSection): SectionMatch | null => {
+  const header = text.match(SECTION_PATTERNS[name]);
+  if (!header || header.index === undefined) return null;
+  const start = header.index + header[0].length;
+  const rest = text.slice(start);
+  const next = rest.match(NEXT_SECTION_PATTERN);
+  return { content: next && next.index !== undefined ? rest.slice(0, next.index) : rest };
+};
+
+interface FileEntry {
+  path: string;
+  purpose: string | null;
+}
+
+const parseFileEntries = (filesSection: string): FileEntry[] =>
+  filesSection.split("\n").flatMap((line) => {
+    const stripped = line.replace(/^(?:[ \t]*[-*+][ \t]+)+/, "").trim();
+    if (!stripped) return [];
+
+    const pathMatch = stripped.match(PATH_PATTERN);
+    if (!pathMatch) return [];
+    const path = pathMatch[0] as string;
+    const rest = stripped.slice(path.length);
+
+    const annotationMatch = rest.match(ANNOTATION_PATTERN);
+    const restAfterAnnotation = annotationMatch ? rest.slice(annotationMatch[0].length) : rest;
+
+    const purposeMatch = restAfterAnnotation.match(PURPOSE_SEPARATOR_PATTERN);
+    const purpose = purposeMatch ? (purposeMatch[1] as string).trim() : null;
+
+    // A line with trailing junk after the path is prose, not an entry.
+    if (!annotationMatch && !purposeMatch && restAfterAnnotation.trim() !== "") return [];
+
+    return [{ path, purpose }];
+  });
+
+/** Steps are the Files entries, in order, labeled "path: purpose". */
 export const extractTodoItems = (message: string): TodoItem[] => {
-  const headerMatch = message.match(PLAN_HEADER_PATTERN);
-  if (!headerMatch) return [];
+  const planHeader = message.match(PLAN_HEADER_PATTERN);
+  if (!planHeader) return [];
+  const afterPlan = message.slice((planHeader.index ?? 0) + planHeader[0].length);
+  const files = findSection(afterPlan, "Files");
+  if (!files) return [];
+  return parseFileEntries(files.content).map((entry, index) => ({
+    step: index + 1,
+    text: entry.purpose ? `${entry.path}: ${entry.purpose}` : entry.path,
+    completed: false,
+  }));
+};
 
-  const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
-
-  return Array.from(planSection.matchAll(NUMBERED_STEP_PATTERN))
-    .map((match) =>
-      // SAFETY: the regex requires (.+?) to match, so group 2 is present.
-      stripBoldMarkers(match[2] as string),
-    )
-    .flatMap((text) => (isPlanStepCandidate(text) ? [cleanStepText(text)] : []))
-    .filter((cleaned) => cleaned.length > 3)
-    .map((text, index) => ({ step: index + 1, text, completed: false }));
+/**
+ * True when the plan still has a Questions section with numbered items.
+ * Callers hide Execute while questions are open, so the user answers them
+ * and the model folds the answers back into Reasoning.
+ */
+export const hasOpenQuestions = (message: string): boolean => {
+  const planHeader = message.match(PLAN_HEADER_PATTERN);
+  if (!planHeader) return false;
+  const afterPlan = message.slice((planHeader.index ?? 0) + planHeader[0].length);
+  const questions = findSection(afterPlan, "Questions");
+  if (!questions) return false;
+  return NUMBERED_ITEM_PATTERN.test(questions.content);
 };
 
 /**
@@ -179,16 +231,22 @@ export const extractTodoItems = (message: string): TodoItem[] => {
  * parse always carries an actionable fix instead of a dead end.
  */
 export const planFormatIssue = (message: string): string | null => {
-  const headerMatch = message.match(PLAN_HEADER_PATTERN);
-  if (!headerMatch) return "missing a 'Plan:' header line at the end of the response";
-
-  const planSection = message.slice(message.indexOf(headerMatch[0]) + headerMatch[0].length);
-  const numbered = planSection.match(/^[ \t]*\d+[.)][ \t]+.+/gm);
-  if (numbered === null) return "no numbered steps after the 'Plan:' header";
-
-  return extractTodoItems(message).length === 0
-    ? "numbered steps could not be parsed into plan steps"
-    : null;
+  const planHeader = message.match(PLAN_HEADER_PATTERN);
+  if (!planHeader) return "missing a '# Plan' header line at the end of the response";
+  const afterPlan = message.slice((planHeader.index ?? 0) + planHeader[0].length);
+  for (const name of ["Reasoning", "Files", "Implementation"] as const) {
+    if (!findSection(afterPlan, name)) return `missing a '## ${name}' section`;
+  }
+  // SAFETY: the checks above found the Files and Implementation sections.
+  const files = findSection(afterPlan, "Files") as SectionMatch;
+  if (parseFileEntries(files.content).length === 0) {
+    return "the '## Files' section has no file entries like 'path (modify) — purpose'";
+  }
+  const implementation = findSection(afterPlan, "Implementation") as SectionMatch;
+  if (!PATH_BLOCK_PATTERN.test(implementation.content)) {
+    return "the '## Implementation' section has no '### path' blocks";
+  }
+  return null;
 };
 
 export const extractDoneSteps = (message: string): number[] =>

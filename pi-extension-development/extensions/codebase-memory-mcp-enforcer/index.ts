@@ -69,7 +69,13 @@ export const createCodebaseMemoryMcpEnforcerExtension = (
 
     return {
       block: true,
-      reason: blockMessage(gitRoot, violations, mcpState(gitRoot, deps), deps.homeDir(), stale),
+      reason: blockMessage({
+        gitRoot,
+        violations,
+        state: mcpState(gitRoot, deps),
+        homeDir: deps.homeDir(),
+        stale,
+      }),
     };
   });
 
