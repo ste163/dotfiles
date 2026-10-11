@@ -41,15 +41,3 @@ require("nvim-tree").setup({
   },
   on_attach = on_attach,
 })
-
--- Auto refresh/reload nvim-tree on focus (ensures commit/push state is always latest)
--- Create an augroup to prevent duplicate autocommands on reload
-local nvim_tree_group = vim.api.nvim_create_augroup("NvimTreeRefresh", { clear = true })
-
-vim.api.nvim_create_autocmd("BufEnter", {
-  group = nvim_tree_group,
-  pattern = "NvimTree_*", -- Matches the NvimTree buffer naming convention
-  callback = function()
-    require("nvim-tree.api").tree.reload()
-  end,
-})
