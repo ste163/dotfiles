@@ -56,3 +56,30 @@ vim.api.nvim_create_autocmd("TermClose", {
 		end
 	end,
 })
+
+-- Close the fugitive status window immediately after a successful push
+vim.api.nvim_create_autocmd("User", {
+	group = fugitive_group,
+	pattern = "FugitiveChanged",
+	callback = function()
+		local job = vim.g._fugitive_last_job
+		if type(job) ~= "table" or type(job.args) ~= "table" or job.args[1] ~= "push" or job.exit_status ~= 0 then
+			return
+		end
+		local targets = {}
+		if type(job.git_dir) == "string" then
+			table.insert(targets, "fugitive://" .. job.git_dir .. "//")
+		end
+		if type(job.file) == "string" then
+			table.insert(targets, job.file)
+		end
+		vim.schedule(function()
+			for _, win in ipairs(vim.api.nvim_list_wins()) do
+				local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win))
+				if vim.tbl_contains(targets, name) then
+					vim.api.nvim_win_close(win, true)
+				end
+			end
+		end)
+	end,
+})
