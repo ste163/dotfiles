@@ -2,12 +2,12 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   DEFAULT_PLAN_FILE_NAME,
-  extractDoneSteps,
   extractTodoItems,
   hasOpenQuestions,
   isSafeCommand,
-  markCompletedSteps,
+  missingSteps,
   planFormatIssue,
+  sameNumbers,
   toBaseName,
   type TodoItem,
   withMdExt,
@@ -242,47 +242,36 @@ test("hasOpenQuestions", async (t) => {
   });
 });
 
-test("extractDoneSteps", async (t) => {
-  await t.test("extracts DONE markers", () => {
-    assert.deepEqual(extractDoneSteps("did step [DONE:1] and [DONE:3]"), [1, 3]);
+test("missingSteps", async (t) => {
+  await t.test("returns only uncompleted steps in order", () => {
+    const items: TodoItem[] = [
+      { step: 1, text: "a", completed: true },
+      { step: 2, text: "b", completed: false },
+      { step: 3, text: "c", completed: false },
+    ];
+    assert.deepEqual(missingSteps(items), [
+      { step: 2, text: "b", completed: false },
+      { step: 3, text: "c", completed: false },
+    ]);
   });
 
-  await t.test("returns empty array when there are no markers", () => {
-    assert.deepEqual(extractDoneSteps("nothing done yet"), []);
-  });
-
-  await t.test("drops markers whose step number overflows to Infinity", () => {
-    assert.deepEqual(extractDoneSteps(`[DONE:${"9".repeat(400)}]`), []);
+  await t.test("returns an empty list when every step completed", () => {
+    const items: TodoItem[] = [{ step: 1, text: "a", completed: true }];
+    assert.deepEqual(missingSteps(items), []);
   });
 });
 
-test("markCompletedSteps", async (t) => {
-  await t.test("returns the new list with matching steps completed and the count", () => {
-    const items: TodoItem[] = [
-      { step: 1, text: "a", completed: false },
-      { step: 2, text: "b", completed: false },
-    ];
-    const result = markCompletedSteps("finished [DONE:1]", items);
-    assert.equal(result.completed, 1);
-    assert.deepEqual(result.todos, [
-      { step: 1, text: "a", completed: true },
-      { step: 2, text: "b", completed: false },
-    ]);
-    assert.equal(items[0]?.completed, false);
+test("sameNumbers", async (t) => {
+  await t.test("true for the same members in any order", () => {
+    assert.equal(sameNumbers([1, 2, 3], [3, 1, 2]), true);
   });
 
-  await t.test("ignores DONE markers with no matching step", () => {
-    const items: TodoItem[] = [{ step: 1, text: "a", completed: false }];
-    const result = markCompletedSteps("[DONE:99]", items);
-    assert.equal(result.completed, 0);
-    assert.deepEqual(result.todos, items);
+  await t.test("false for different lengths", () => {
+    assert.equal(sameNumbers([1, 2], [1, 2, 3]), false);
   });
 
-  await t.test("does not count steps that were already completed", () => {
-    const items: TodoItem[] = [{ step: 1, text: "a", completed: true }];
-    const result = markCompletedSteps("[DONE:1]", items);
-    assert.equal(result.completed, 0);
-    assert.deepEqual(result.todos, items);
+  await t.test("false for different members", () => {
+    assert.equal(sameNumbers([1, 2], [1, 3]), false);
   });
 });
 

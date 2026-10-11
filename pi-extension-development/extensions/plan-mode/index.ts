@@ -6,7 +6,9 @@
  * allowlist, so the plan lives only in the conversation. From overview the
  * user approves one path: continue planning, write the plan to a file
  * (plan-file phase: only that one file is writable), or execute the plan
- * (executing phase: full access with [DONE:n] progress tracking).
+ * (executing phase: full access; the model registers each completed step
+ * with the plan_step_complete tool, and the extension runs the
+ * progress-check protocol when a run writes but registers nothing).
  *
  * Scope: this extension covers the built-in write and edit tools plus the
  * bash tool. Tools registered by other extensions or MCP servers are not
@@ -14,8 +16,9 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, TextContent } from "@earendil-works/pi-ai";
+import { Type, type AssistantMessage, type TextContent } from "@earendil-works/pi-ai";
 import {
+  defineTool,
   isToolCallEventType,
   type ExtensionAPI,
   type ExtensionContext,
@@ -30,21 +33,27 @@ import {
   executeMessage,
   executeText,
   formatCorrectionMessage,
-  nudgeText,
   overviewContextMessage,
   planFileContextMessage,
   planFileCorrectionMessage,
+  progressAckMessage,
+  progressCheckText,
+  registeredStepResult,
+  stepAlreadyRegisteredReason,
+  stepNotNextReason,
+  stepOutOfRangeReason,
+  stepToolPhaseReason,
   todoListMessage,
   writePlanFileMessage,
 } from "./messages.ts";
 import {
   DEFAULT_PLAN_FILE_NAME,
-  extractDoneSteps,
   extractTodoItems,
   hasOpenQuestions,
   isSafeCommand,
-  markCompletedSteps,
+  missingSteps,
   planFormatIssue,
+  sameNumbers,
   toBaseName,
   type TodoItem,
   withMdExt,
@@ -53,10 +62,11 @@ import {
 type Phase = "off" | "overview" | "plan-file" | "executing";
 
 const WRITE_TOOL_NAMES: readonly string[] = ["write", "edit"];
+const PLAN_TOOL_NAME = "plan_step_complete";
 
-// The todo widget shows a sliding window: up to TODO_WINDOW_SIZE pending
-// steps, and once TODO_WINDOW_DROP_AFTER of them complete, the completed
-// ones drop off and the next pending steps slide in. Display only: the
+// The todo widget shows a sliding window: up to TODO_WINDOW_SIZE steps, and
+// once TODO_WINDOW_DROP_AFTER of them complete, the completed ones drop for
+// good and only the next pending steps stay visible. Display only: the
 // model still gets the full list in the execution context.
 const TODO_WINDOW_SIZE = 4;
 const TODO_WINDOW_DROP_AFTER = 2;
@@ -91,12 +101,14 @@ interface PlanModeState {
   statusWidget: { invalidate(): void } | null;
   /** True after a format-correction turn was sent; cleared by a valid plan. */
   formatWarned: boolean;
-  /** Write/edit tool calls in the current turn; reset at each turn start. */
-  turnWriteCalls: number;
-  /** Skip the next nudge, so nudges never fire two turns in a row. */
-  nudgeCooldown: boolean;
-  /** Todo window start index for the sliding widget; UI only. */
-  todoWindowStart: number;
+  /** Write/edit tool calls in the current run; reset at agent_start. */
+  runWriteCalls: number;
+  /** Steps registered with plan_step_complete in the current run; reset at agent_start. */
+  runRegistered: number;
+  /** Missing step numbers while a progress check is open; null = no open check. Never persisted. */
+  checkMissing: number[] | null;
+  /** True once the todo widget dropped its first batch of completed items. */
+  todoDropped: boolean;
 }
 
 interface PersistedState {
@@ -112,9 +124,10 @@ const createState = (): PlanModeState => ({
   toolsBeforeOverview: null,
   statusWidget: null,
   formatWarned: false,
-  turnWriteCalls: 0,
-  nudgeCooldown: false,
-  todoWindowStart: 0,
+  runWriteCalls: 0,
+  runRegistered: 0,
+  checkMissing: null,
+  todoDropped: false,
 });
 
 const isAssistantMessage = (message: AgentMessage): message is AssistantMessage =>
@@ -197,7 +210,11 @@ export const createPlanModeExtension = (
 
   const enterOverview = (): void => {
     state.toolsBeforeOverview = pi.getActiveTools();
-    pi.setActiveTools(state.toolsBeforeOverview.filter((name) => !WRITE_TOOL_NAMES.includes(name)));
+    pi.setActiveTools(
+      state.toolsBeforeOverview.filter(
+        (name) => !WRITE_TOOL_NAMES.includes(name) && name !== PLAN_TOOL_NAME,
+      ),
+    );
   };
 
   const leaveOverview = (): void => {
@@ -207,26 +224,38 @@ export const createPlanModeExtension = (
     }
   };
 
+  // The plan tool exists only for the executing phase: it is kept out of
+  // the active set everywhere else, on top of the tool_call phase guard.
+  const setPlanToolActive = (active: boolean): void => {
+    const tools = pi.getActiveTools();
+    const has = tools.includes(PLAN_TOOL_NAME);
+    if (active === has) return;
+    pi.setActiveTools(
+      active ? [...tools, PLAN_TOOL_NAME] : tools.filter((name) => name !== PLAN_TOOL_NAME),
+    );
+  };
+
   const updateStatus = (ctx: ExtensionContext): void => {
     if (state.phase === "executing" && state.todos.length > 0) {
-      let windowStart = Math.min(state.todoWindowStart, state.todos.length);
-      const visible = state.todos.slice(windowStart, windowStart + TODO_WINDOW_SIZE);
-      const completedInWindow = visible.filter((item) => item.completed).length;
-      if (completedInWindow >= TODO_WINDOW_DROP_AFTER) {
-        const firstPending = state.todos.findIndex(
-          (item, index) => index >= windowStart && !item.completed,
-        );
-        windowStart = firstPending === -1 ? windowStart : firstPending;
-        state.todoWindowStart = windowStart;
+      let visible: TodoItem[];
+      if (state.todoDropped) {
+        visible = state.todos.filter((item) => !item.completed).slice(0, TODO_WINDOW_SIZE);
+      } else {
+        visible = state.todos.slice(0, TODO_WINDOW_SIZE);
+        const completedInWindow = visible.filter((item) => item.completed).length;
+        if (completedInWindow >= TODO_WINDOW_DROP_AFTER) {
+          // The first batch dropped: from now on only pending steps show,
+          // so a stuck pending step cannot freeze the window.
+          state.todoDropped = true;
+          visible = state.todos.filter((item) => !item.completed).slice(0, TODO_WINDOW_SIZE);
+        }
       }
-      const lines = state.todos
-        .slice(windowStart, windowStart + TODO_WINDOW_SIZE)
-        .map((item) =>
-          item.completed
-            ? ctx.ui.theme.fg("success", "[x] ") +
-              ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
-            : `${ctx.ui.theme.fg("muted", "[ ] ")}${item.text}`,
-        );
+      const lines = visible.map((item) =>
+        item.completed
+          ? ctx.ui.theme.fg("success", "[x] ") +
+            ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
+          : `${ctx.ui.theme.fg("muted", "[ ] ")}${item.text}`,
+      );
       ctx.ui.setWidget("plan-todos", lines);
     } else {
       ctx.ui.setWidget("plan-todos", undefined);
@@ -247,7 +276,9 @@ export const createPlanModeExtension = (
     const first = (state.todos[0] as TodoItem).text;
 
     state.phase = "executing";
-    state.todoWindowStart = 0;
+    state.todoDropped = false;
+    state.checkMissing = null;
+    setPlanToolActive(true);
     updateStatus(ctx);
     persistState();
 
@@ -288,6 +319,7 @@ export const createPlanModeExtension = (
     leaveOverview();
 
     state.phase = "plan-file";
+    setPlanToolActive(false);
     updateStatus(ctx);
     persistState();
 
@@ -303,7 +335,8 @@ export const createPlanModeExtension = (
       enterOverview();
       state.phase = "overview";
       state.todos = [];
-      state.todoWindowStart = 0;
+      state.todoDropped = false;
+      state.checkMissing = null;
       ctx.ui.notify(
         "Plan mode enabled (overview). Write and edit tools are disabled. Discuss the plan first.",
       );
@@ -311,12 +344,79 @@ export const createPlanModeExtension = (
       if (state.phase === "overview") leaveOverview();
       state.phase = "off";
       state.todos = [];
-      state.todoWindowStart = 0;
+      state.todoDropped = false;
+      state.checkMissing = null;
+      setPlanToolActive(false);
       ctx.ui.notify("Plan mode disabled. Full access restored.");
     }
     updateStatus(ctx);
     persistState();
   };
+
+  // Validates a plan_step_complete call. Allowed calls mark the step, so
+  // registration is a validated tool_call: wrong, duplicate, and
+  // out-of-order calls are blocked with a reason naming the problem.
+  const registerStep = (
+    stepRaw: unknown,
+    ctx: ExtensionContext,
+  ): { block: true; reason: string } | undefined => {
+    if (state.phase !== "executing") {
+      return { block: true, reason: stepToolPhaseReason() };
+    }
+    const step = Number(stepRaw);
+    if (!Number.isInteger(step) || step < 1 || step > state.todos.length) {
+      return {
+        block: true,
+        reason: stepOutOfRangeReason(
+          Number.isInteger(step) ? step : String(stepRaw),
+          state.todos.length,
+        ),
+      };
+    }
+    // SAFETY: the range check above keeps the index inside the todo list.
+    const item = state.todos[step - 1] as TodoItem;
+    if (item.completed) {
+      return { block: true, reason: stepAlreadyRegisteredReason(step) };
+    }
+    // SAFETY: item is incomplete, so the first pending step always exists.
+    const pending = state.todos.find((t) => !t.completed) as TodoItem;
+    if (pending.step !== step) {
+      return { block: true, reason: stepNotNextReason(step, pending) };
+    }
+
+    state.todos = state.todos.map((t) => (t.step === step ? { ...t, completed: true } : t));
+    state.runRegistered += 1;
+    updateStatus(ctx);
+    persistState();
+    return;
+  };
+
+  pi.registerTool(
+    defineTool({
+      name: PLAN_TOOL_NAME,
+      label: "Plan step complete",
+      description:
+        "Register one completed step of the executing plan. Call once per step, in order, right after the step's work finished. The tool blocks calls for the wrong, duplicate, or out-of-order step and reports the registered count.",
+      promptSnippet:
+        "plan_step_complete(step) — register a completed plan step (executing phase only)",
+      parameters: Type.Object({
+        step: Type.Integer({ description: "Plan step number to register", minimum: 1 }),
+      }),
+      defaultActive: false,
+      async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+        // SAFETY: the tool_call handler validated and marked the step
+        // before execution, so the index resolves to the registered item.
+        const item = state.todos[params.step - 1] as TodoItem;
+        const completed = state.todos.filter((t) => t.completed).length;
+        return {
+          content: [
+            { type: "text", text: registeredStepResult(item, completed, state.todos.length) },
+          ],
+          details: { step: params.step },
+        };
+      },
+    }),
+  );
 
   pi.registerFlag("plan", {
     description: "Start in plan overview mode (discussion only, no writes)",
@@ -334,14 +434,18 @@ export const createPlanModeExtension = (
     handler: async (ctx) => togglePlanMode(ctx),
   });
 
-  pi.on("tool_call", (event) => {
-    // Nudge tracking: during execution, write and edit calls are the
-    // signal that a step may have completed without its tag.
+  pi.on("tool_call", (event, ctx) => {
+    if (event.toolName === PLAN_TOOL_NAME) {
+      return registerStep((event.input as { step?: unknown }).step, ctx);
+    }
+
+    // Progress tracking: during execution, write and edit calls are the
+    // signal that a step may have completed without registration.
     if (
       state.phase === "executing" &&
       (isToolCallEventType("write", event) || isToolCallEventType("edit", event))
     ) {
-      state.turnWriteCalls += 1;
+      state.runWriteCalls += 1;
       return;
     }
 
@@ -421,19 +525,14 @@ export const createPlanModeExtension = (
     };
   });
 
-  pi.on("message_update", (event, ctx) => {
-    if (state.phase !== "executing" || state.todos.length === 0) return;
-    if (!isAssistantMessage(event.message)) return;
-
-    const result = markCompletedSteps(getTextContent(event.message), state.todos);
-    if (result.completed > 0) {
-      state.todos = result.todos;
-      updateStatus(ctx);
-    }
+  // Per-run counters reset here: agent_start fires for every run,
+  // including post-run continuations that never get before_agent_start.
+  pi.on("agent_start", () => {
+    state.runWriteCalls = 0;
+    state.runRegistered = 0;
   });
 
   pi.on("before_agent_start", () => {
-    state.turnWriteCalls = 0;
     if (state.phase === "overview") {
       return { message: overviewContextMessage };
     }
@@ -457,40 +556,66 @@ export const createPlanModeExtension = (
     return;
   });
 
-  pi.on("turn_end", (event, ctx) => {
+  // Registration happens at tool_call time and persists right away, so
+  // turn_end only checkpoints the state.
+  pi.on("turn_end", () => {
     if (state.phase !== "executing" || state.todos.length === 0) return;
-    if (!isAssistantMessage(event.message)) return;
-
-    const text = getTextContent(event.message);
-    const result = markCompletedSteps(text, state.todos);
-    if (result.completed > 0) {
-      state.todos = result.todos;
-      updateStatus(ctx);
-    }
     persistState();
-
-    // Nudge: a turn that wrote but tagged nothing may have completed a
-    // step and forgotten the tag. One nudge per miss, never two turns in
-    // a row, and the repair tag is allowed only when the nudge asks.
-    const taggedThisTurn = extractDoneSteps(text).length > 0;
-    const pending = state.todos.some((item) => !item.completed);
-    if (taggedThisTurn || state.nudgeCooldown) {
-      state.nudgeCooldown = false;
-    } else if (pending && state.turnWriteCalls > 0) {
-      state.nudgeCooldown = true;
-      pi.sendUserMessage(nudgeText, { deliverAs: "followUp" });
-    }
   });
+
+  // Sends a progress check naming every missing step with its file path.
+  const fireProgressCheck = (missing: number[], reason: "write" | "narrowed"): void => {
+    const completed = state.todos.filter((t) => t.completed).length;
+    pi.sendUserMessage(
+      progressCheckText(
+        state.todos.filter((t) => missing.includes(t.step)),
+        completed,
+        state.todos.length,
+        reason,
+      ),
+      { deliverAs: "followUp" },
+    );
+  };
+
+  // The check protocol: one check per state. A reply that changes the
+  // missing set re-fires once with the narrowed set; a reply that does
+  // not closes the check with an ack, so nothing ever loops.
+  const handleProgressCheck = (missing: number[]): void => {
+    if (state.checkMissing !== null) {
+      if (sameNumbers(missing, state.checkMissing)) {
+        const completed = state.todos.filter((t) => t.completed).length;
+        pi.sendMessage(progressAckMessage(missing, completed, state.todos.length), {
+          triggerTurn: false,
+        });
+        state.checkMissing = null;
+      } else {
+        state.checkMissing = missing;
+        fireProgressCheck(missing, "narrowed");
+      }
+      return;
+    }
+
+    if (state.runWriteCalls > 0 && state.runRegistered === 0) {
+      state.checkMissing = missing;
+      fireProgressCheck(missing, "write");
+    }
+  };
 
   pi.on("agent_end", async (event, ctx) => {
     if (state.phase === "executing" && state.todos.length > 0) {
-      if (state.todos.every((t) => t.completed)) {
+      const missing = missingSteps(state.todos).map((t) => t.step);
+
+      if (missing.length === 0) {
         pi.sendMessage(completeMessage(state.todos), { triggerTurn: false });
         state.phase = "off";
         state.todos = [];
+        state.checkMissing = null;
         updateStatus(ctx);
         persistState();
+        return;
       }
+
+      handleProgressCheck(missing);
       return;
     }
 
@@ -629,12 +754,16 @@ export const createPlanModeExtension = (
 
     if (state.phase === "overview") {
       enterOverview();
+    } else if (state.phase === "executing") {
+      setPlanToolActive(true);
+    } else {
+      setPlanToolActive(false);
     }
 
     const isResume = planEntry !== undefined;
 
     if (isResume && state.phase === "executing" && state.todos.length > 0) {
-      // Scan only messages after the last execute marker, so [DONE:n] tags
+      // Scan only entries after the last execute marker, so registrations
       // from previous plans never leak into the restored list.
       const executeIndex = entries.findLastIndex(
         (entry) => (entry as { customType?: string }).customType === "plan-mode-execute",
@@ -649,7 +778,18 @@ export const createPlanModeExtension = (
             : [],
         )
         .filter(isAssistantMessage);
-      state.todos = markCompletedSteps(messages.map(getTextContent).join("\n"), state.todos).todos;
+      const registered = messages.flatMap((message) =>
+        message.content.flatMap((block) =>
+          block.type === "toolCall" &&
+          block.name === PLAN_TOOL_NAME &&
+          typeof block.arguments?.["step"] === "number"
+            ? [block.arguments["step"] as number]
+            : [],
+        ),
+      );
+      state.todos = state.todos.map((t) =>
+        registered.includes(t.step) ? { ...t, completed: true } : t,
+      );
     }
 
     const planFileMissing =

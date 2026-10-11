@@ -64,10 +64,12 @@ interface FakePi {
   sentMessages: SentMessage[];
   sentUserMessages: { text: string; options: Record<string, unknown> }[];
   activeTools: string[];
+  tools: Record<string, { execute?: (...args: unknown[]) => Promise<unknown> }>;
   on(event: string, handler: Handler): void;
   registerCommand(name: string, def: { description: string; handler: CommandHandler }): void;
   registerShortcut(_key: unknown, def: { handler: ShortcutHandler }): void;
   registerFlag(name: string, def: { default?: unknown }): void;
+  registerTool(def: { name: string; execute?: (...args: unknown[]) => Promise<unknown> }): void;
   getFlag(name: string): unknown;
   getActiveTools(): string[];
   setActiveTools(names: string[]): void;
@@ -84,6 +86,7 @@ const createFakePi = (): FakePi => {
   const entries: FakeEntry[] = [];
   const sentMessages: SentMessage[] = [];
   const sentUserMessages: FakePi["sentUserMessages"] = [];
+  const tools: FakePi["tools"] = {};
 
   return {
     handlers,
@@ -94,6 +97,7 @@ const createFakePi = (): FakePi => {
     sentMessages,
     sentUserMessages,
     activeTools: [...DEFAULT_ACTIVE_TOOLS],
+    tools,
     on(event, handler) {
       handlers[event] = [...(handlers[event] ?? []), handler];
     },
@@ -105,6 +109,9 @@ const createFakePi = (): FakePi => {
     },
     registerFlag(name, def) {
       flags[name] = def.default;
+    },
+    registerTool(def) {
+      tools[def.name] = def;
     },
     getFlag(name) {
       return flags[name];
@@ -257,6 +264,24 @@ const customEntry = (customType: string, data: unknown): FakeEntry => ({
   type: "custom",
   customType,
   data: data as Record<string, unknown>,
+});
+
+test("callHandler runs every registered handler in order and tolerates missing ones", async () => {
+  const { pi } = createExtension();
+  const { ctx } = createFakeCtx();
+  const order: string[] = [];
+  pi.on("agent_start", () => {
+    order.push("extra");
+  });
+  await callHandler(pi, "agent_start", {}, ctx);
+  assert.deepEqual(order, ["extra"]);
+
+  // An event with no handlers resolves to undefined.
+  assert.equal(await callHandler(pi, "no_such_event", {}, ctx), undefined);
+
+  // A sparse handler list skips the hole instead of throwing.
+  pi.handlers["sparse_event"] = [undefined as unknown as Handler];
+  assert.equal(await callHandler(pi, "sparse_event", {}, ctx), undefined);
 });
 
 const messageEntry = (message: unknown): FakeEntry => ({ type: "message", message });
@@ -802,17 +827,22 @@ test("Execute plan from overview starts execution with full access", async () =>
     ctx,
   );
 
-  assert.deepEqual(pi.activeTools, DEFAULT_ACTIVE_TOOLS);
+  assert.deepEqual(pi.activeTools, [...DEFAULT_ACTIVE_TOOLS, "plan_step_complete"]);
   assert.equal(pi.sentMessages.length, 2);
   assert.equal(pi.sentMessages[0]?.message.customType, "plan-mode-todo-list");
   assert.equal(pi.sentMessages[1]?.message.customType, "plan-mode-execute");
   assert.match(pi.sentMessages[1]?.message.content ?? "", /Start with: src\/a\.ts: first purpose/);
+  assert.match(
+    pi.sentMessages[1]?.message.content ?? "",
+    /plan_step_complete tool with its number/,
+  );
   assert.deepEqual(pi.sentMessages[1]?.options, { deliverAs: "followUp" });
   assert.equal(pi.sentUserMessages.length, 1);
   assert.deepEqual(pi.sentUserMessages[0]?.options, { deliverAs: "followUp" });
   assert.match(pi.sentUserMessages[0]?.text ?? "", /Execute the plan\./);
   assert.match(pi.sentUserMessages[0]?.text ?? "", /Start with: src\/a\.ts: first purpose/);
   assert.match(pi.sentUserMessages[0]?.text ?? "", /Background events are not signals/);
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /calling the plan_step_complete tool/);
   assert.deepEqual(lastEntryData(pi), {
     phase: "executing",
     todos: [{ step: 1, text: "src/a.ts: first purpose", completed: false }],
@@ -1351,8 +1381,30 @@ test("injects the execution context while executing with unfinished steps only",
   assert.equal(result.message.customType, "plan-mode-execution-context");
   assert.match(result.message.content, /Completed: 1\/2/);
   assert.match(result.message.content, /Next: step 2 - b/);
+  assert.match(result.message.content, /plan_step_complete/);
+  assert.match(result.message.content, /One call per step, in order/);
   assert.doesNotMatch(result.message.content, /1\. a/);
   assert.match(result.message.content, /2\. b/);
+});
+
+test("injects the execution context with the completed line when every step is done", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [{ step: 1, text: "a", completed: true }],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  const result = (await callHandler(pi, "before_agent_start", {}, ctx)) as {
+    message: { customType: string; content: string };
+  };
+  assert.equal(result.message.customType, "plan-mode-execution-context");
+  assert.match(result.message.content, /All steps completed\./);
+  assert.match(result.message.content, /Completed: 1\/1/);
 });
 
 test("injects nothing while off or executing with an empty todo list", async () => {
@@ -1439,149 +1491,7 @@ test("keeps only the newest steering copy while a phase is active", async () => 
   ]);
 });
 
-// --- message_update streaming marking ---
-
-test("marks DONE steps live during streaming and refreshes the widget", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", {
-      phase: "executing",
-      todos: [
-        { step: 1, text: "a", completed: false },
-        { step: 2, text: "b", completed: false },
-      ],
-      planFileName: "plan.md",
-    }),
-  ];
-  const { ctx, widgetUpdates, statusWidget } = createFakeCtx({ entries });
-  await callHandler(pi, "session_start", {}, ctx);
-  const entryCount = pi.entries.length;
-
-  await callHandler(
-    pi,
-    "message_update",
-    { message: assistantMessage([textBlock("[DONE:1]")]) },
-    ctx,
-  );
-
-  assert.deepEqual(widgetUpdates.at(-1), ["[x] a", "[ ] b"]);
-  assert.deepEqual(statusWidget.component?.render(), [" plan  executing 1/2"]);
-  assert.equal(pi.entries.length, entryCount);
-});
-
-test("ignores streamed updates with no new tags", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", {
-      phase: "executing",
-      todos: [{ step: 1, text: "a", completed: false }],
-      planFileName: "plan.md",
-    }),
-  ];
-  const { ctx, widgetUpdates } = createFakeCtx({ entries });
-  await callHandler(pi, "session_start", {}, ctx);
-  const widgetUpdatesAfterStart = widgetUpdates.length;
-
-  await callHandler(
-    pi,
-    "message_update",
-    { message: assistantMessage([textBlock("no tags yet")]) },
-    ctx,
-  );
-
-  assert.equal(widgetUpdates.length, widgetUpdatesAfterStart);
-  assert.deepEqual(lastEntryData(pi).todos, [{ step: 1, text: "a", completed: false }]);
-});
-
-test("ignores message_update outside the executing phase", async () => {
-  const { pi } = createExtension();
-  const { ctx } = createFakeCtx();
-
-  assert.equal(
-    await callHandler(
-      pi,
-      "message_update",
-      { message: assistantMessage([textBlock("[DONE:1]")]) },
-      ctx,
-    ),
-    undefined,
-  );
-
-  await pi.commands["plan"]?.handler(undefined, ctx);
-  assert.equal(
-    await callHandler(
-      pi,
-      "message_update",
-      { message: assistantMessage([textBlock("[DONE:1]")]) },
-      ctx,
-    ),
-    undefined,
-  );
-});
-
-test("ignores message_update while executing with no todos", async () => {
-  const { pi } = createExtension();
-  const entries = [customEntry("plan-mode", { phase: "executing", todos: [], planFileName: null })];
-  const { ctx } = createFakeCtx({ entries });
-  await callHandler(pi, "session_start", {}, ctx);
-
-  assert.equal(
-    await callHandler(
-      pi,
-      "message_update",
-      { message: assistantMessage([textBlock("[DONE:1]")]) },
-      ctx,
-    ),
-    undefined,
-  );
-});
-
-test("ignores non-assistant message_update events", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", {
-      phase: "executing",
-      todos: [{ step: 1, text: "a", completed: false }],
-      planFileName: "plan.md",
-    }),
-  ];
-  const { ctx } = createFakeCtx({ entries });
-  await callHandler(pi, "session_start", {}, ctx);
-
-  await callHandler(pi, "message_update", { message: userMessage("[DONE:1]") }, ctx);
-
-  assert.deepEqual(lastEntryData(pi).todos, [{ step: 1, text: "a", completed: false }]);
-});
-
-test("turn_end still persists after streaming already marked the step", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", {
-      phase: "executing",
-      todos: [{ step: 1, text: "a", completed: false }],
-      planFileName: "plan.md",
-    }),
-  ];
-  const { ctx, widgetUpdates } = createFakeCtx({ entries });
-  await callHandler(pi, "session_start", {}, ctx);
-
-  await callHandler(
-    pi,
-    "message_update",
-    { message: assistantMessage([textBlock("[DONE:1]")]) },
-    ctx,
-  );
-  const widgetUpdatesAfterStream = widgetUpdates.length;
-  const entriesBeforeTurnEnd = pi.entries.length;
-
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("[DONE:1]")]) }, ctx);
-
-  assert.equal(widgetUpdates.length, widgetUpdatesAfterStream);
-  assert.equal(pi.entries.length, entriesBeforeTurnEnd + 1);
-  assert.deepEqual(lastEntryData(pi).todos, [{ step: 1, text: "a", completed: true }]);
-});
-
-// --- turn_end progress ---
+// --- turn_end checkpoint ---
 
 test("ignores turns while not executing", async () => {
   const { pi } = createExtension();
@@ -1604,50 +1514,7 @@ test("ignores turns while executing with no todos", async () => {
   assert.equal(pi.entries.length, entryCount);
 });
 
-test("ignores non-assistant messages at turn end", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", {
-      phase: "executing",
-      todos: [{ step: 1, text: "a", completed: false }],
-      planFileName: "plan.md",
-    }),
-  ];
-  const { ctx } = createFakeCtx({ entries });
-  await callHandler(pi, "session_start", {}, ctx);
-
-  await callHandler(pi, "turn_end", { message: userMessage("[DONE:1]") }, ctx);
-
-  assert.deepEqual(lastEntryData(pi).todos, [{ step: 1, text: "a", completed: false }]);
-});
-
-test("marks DONE steps at turn end and updates the status widget", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const entries = [
-    customEntry("plan-mode", {
-      phase: "executing",
-      todos: [
-        { step: 1, text: "a", completed: false },
-        { step: 2, text: "b", completed: false },
-      ],
-      planFileName: "plan.md",
-    }),
-  ];
-  const { ctx, statusWidget, widgetUpdates } = createFakeCtx({ entries });
-  await callHandler(pi, "session_start", {}, ctx);
-
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("[DONE:1]")]) }, ctx);
-
-  assert.deepEqual(statusWidget.component?.render(), [" plan  executing 1/2"]);
-  assert.equal(statusWidget.placement, "belowEditor");
-  assert.deepEqual(widgetUpdates.at(-1), ["[x] a", "[ ] b"]);
-  assert.deepEqual(lastEntryData(pi).todos, [
-    { step: 1, text: "a", completed: true },
-    { step: 2, text: "b", completed: false },
-  ]);
-});
-
-test("persists at turn end even without DONE markers", async () => {
+test("persists at turn end without reading the message", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
   const entries = [
     customEntry("plan-mode", {
@@ -1660,7 +1527,7 @@ test("persists at turn end even without DONE markers", async () => {
   await callHandler(pi, "session_start", {}, ctx);
   const entryCount = pi.entries.length;
 
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("no markers")]) }, ctx);
+  await callHandler(pi, "turn_end", { message: userMessage("no markers") }, ctx);
 
   assert.equal(pi.entries.length, entryCount + 1);
 });
@@ -1687,6 +1554,11 @@ test("the todo widget shows at most four pending steps", async () => {
   assert.deepEqual(widgetUpdates.at(-1), ["[ ] one", "[ ] two", "[ ] three", "[ ] four"]);
 });
 
+const stepCall = (step: unknown): unknown => ({ toolName: "plan_step_complete", input: { step } });
+
+const registerStep = (ctx: unknown, pi: FakePi, step: number): Promise<unknown> =>
+  callHandler(pi, "tool_call", stepCall(step), ctx);
+
 test("one completed step stays visible in the window", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
   const entries = [
@@ -1695,7 +1567,7 @@ test("one completed step stays visible in the window", async () => {
   const { ctx, widgetUpdates } = createFakeCtx({ entries });
   await callHandler(pi, "session_start", {}, ctx);
 
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("[DONE:1]")]) }, ctx);
+  await registerStep(ctx, pi, 1);
 
   assert.deepEqual(widgetUpdates.at(-1), ["[x] one", "[ ] two", "[ ] three", "[ ] four"]);
 });
@@ -1708,17 +1580,40 @@ test("two completed steps batch-drop and refill the window", async () => {
   const { ctx, widgetUpdates } = createFakeCtx({ entries });
   await callHandler(pi, "session_start", {}, ctx);
 
-  await callHandler(
-    pi,
-    "turn_end",
-    { message: assistantMessage([textBlock("[DONE:1] [DONE:2]")]) },
-    ctx,
-  );
+  await registerStep(ctx, pi, 1);
+  await registerStep(ctx, pi, 2);
 
   assert.deepEqual(widgetUpdates.at(-1), ["[ ] three", "[ ] four", "[ ] five", "[ ] six"]);
 });
 
-// --- nudge ---
+test("a stuck pending step does not freeze the todo window", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [
+        { step: 1, text: "one", completed: false },
+        { step: 2, text: "two", completed: true },
+        { step: 3, text: "three", completed: true },
+        { step: 4, text: "four", completed: true },
+        { step: 5, text: "five", completed: false },
+        { step: 6, text: "six", completed: false },
+        { step: 7, text: "seven", completed: false },
+      ],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx, widgetUpdates } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  assert.deepEqual(widgetUpdates.at(-1), ["[ ] one", "[ ] five", "[ ] six", "[ ] seven"]);
+
+  await registerStep(ctx, pi, 1);
+
+  assert.deepEqual(widgetUpdates.at(-1), ["[ ] five", "[ ] six", "[ ] seven"]);
+});
+
+// --- step registration tool ---
 
 const executingEntries = (): FakeEntry[] => [
   customEntry("plan-mode", {
@@ -1731,59 +1626,371 @@ const executingEntries = (): FakeEntry[] => [
 const writeCall = (ctx: unknown, pi: FakePi): Promise<unknown> =>
   callHandler(pi, "tool_call", { toolName: "write", input: { path: "x.md", content: "x" } }, ctx);
 
-test("nudges when a turn wrote but tagged nothing", async () => {
+test("registers a valid step, persists, and updates the widget", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [
+        { step: 1, text: "a", completed: false },
+        { step: 2, text: "b", completed: false },
+      ],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx, widgetUpdates, statusWidget } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  const result = await registerStep(ctx, pi, 1);
+
+  assert.equal(result, undefined);
+  assert.deepEqual(statusWidget.component?.render(), [" plan  executing 1/2"]);
+  assert.deepEqual(widgetUpdates.at(-1), ["[x] a", "[ ] b"]);
+  assert.deepEqual(lastEntryData(pi).todos, [
+    { step: 1, text: "a", completed: true },
+    { step: 2, text: "b", completed: false },
+  ]);
+});
+
+test("the plan_step_complete tool reports the registered result", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [{ step: 1, text: "a", completed: false }],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  const tool = pi.tools["plan_step_complete"] as {
+    execute: (...args: unknown[]) => Promise<{
+      content: { type: string; text: string }[];
+      details: { step: number };
+    }>;
+  };
+  assert.ok(tool, "expected the plan_step_complete tool to be registered");
+
+  await registerStep(ctx, pi, 1);
+  const result = await tool.execute("id", { step: 1 }, undefined, undefined, {});
+
+  assert.deepEqual(result.content, [
+    { type: "text", text: "Registered step 1 (a). Completed: 1/1." },
+  ]);
+  assert.deepEqual(result.details, { step: 1 });
+});
+
+test("blocks registration outside the executing phase", async () => {
+  const { pi } = createExtension();
+  const { ctx } = createFakeCtx();
+
+  const offResult = await registerStep(ctx, pi, 1);
+  assert.equal((offResult as { block: boolean }).block, true);
+  assert.match((offResult as { reason: string }).reason, /only available while executing/);
+
+  await pi.commands["plan"]?.handler(undefined, ctx);
+  const overviewResult = await registerStep(ctx, pi, 1);
+  assert.equal((overviewResult as { block: boolean }).block, true);
+  assert.match((overviewResult as { reason: string }).reason, /only available while executing/);
+  assert.deepEqual(lastEntryData(pi).todos, []);
+});
+
+test("blocks out-of-range and non-integer steps", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [{ step: 1, text: "a", completed: false }],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  const zero = await registerStep(ctx, pi, 0);
+  assert.equal((zero as { block: boolean }).block, true);
+  assert.match((zero as { reason: string }).reason, /No matching step 0/);
+
+  const high = await registerStep(ctx, pi, 99);
+  assert.equal((high as { block: boolean }).block, true);
+  assert.match((high as { reason: string }).reason, /the plan has steps 1\.\.1/);
+
+  const text = await callHandler(pi, "tool_call", stepCall("x"), ctx);
+  assert.equal((text as { block: boolean }).block, true);
+  assert.match((text as { reason: string }).reason, /No matching step x/);
+
+  assert.deepEqual(lastEntryData(pi).todos, [{ step: 1, text: "a", completed: false }]);
+});
+
+test("blocks registration when the executing todo list is empty", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", { phase: "executing", todos: [], planFileName: "plan.md" }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  const result = await registerStep(ctx, pi, 1);
+
+  assert.equal((result as { block: boolean }).block, true);
+  assert.match((result as { reason: string }).reason, /the plan has no steps/);
+});
+
+test("blocks duplicate registration", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [{ step: 1, text: "a", completed: true }],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  const result = await registerStep(ctx, pi, 1);
+
+  assert.equal((result as { block: boolean }).block, true);
+  assert.match((result as { reason: string }).reason, /already registered/);
+});
+
+test("blocks out-of-order registration and names the pending step", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [
+        { step: 1, text: "a", completed: false },
+        { step: 2, text: "b", completed: false },
+        { step: 3, text: "c", completed: false },
+      ],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  const result = await registerStep(ctx, pi, 3);
+
+  assert.equal((result as { block: boolean }).block, true);
+  assert.match(
+    (result as { reason: string }).reason,
+    /Step 3 is not next: step 1 \(a\) is still pending/,
+  );
+});
+
+// --- progress check protocol ---
+
+test("fires a progress check when a run wrote but registered no step", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
   const { ctx } = createFakeCtx({ entries: executingEntries() });
   await callHandler(pi, "session_start", {}, ctx);
 
   await writeCall(ctx, pi);
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("did work")]) }, ctx);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
 
   assert.equal(pi.sentUserMessages.length, 1);
   assert.deepEqual(pi.sentUserMessages[0]?.options, { deliverAs: "followUp" });
   assert.match(pi.sentUserMessages[0]?.text ?? "", /PROGRESS CHECK/);
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Step 1 \(one\): call plan_step_complete\(1\)/);
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Completed: 0\/1/);
 });
 
-test("does not nudge when the turn tagged a step", async () => {
+test("does not check when the run registered a step", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [
+        { step: 1, text: "one", completed: false },
+        { step: 2, text: "two", completed: false },
+      ],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await writeCall(ctx, pi);
+  await registerStep(ctx, pi, 1);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 0);
+});
+
+test("does not check when the run made no writes", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const { ctx } = createFakeCtx({ entries: executingEntries() });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 0);
+});
+
+test("the handoff replay: blocked calls surface the missing step, one check, one repair", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [
+        { step: 1, text: "src/domain/weekView.ts", completed: false },
+        { step: 2, text: "src/domain/weekView.spec.ts", completed: false },
+        { step: 3, text: "src/pages/home/components/WeekStrip/WeekStrip.tsx", completed: false },
+        { step: 4, text: "src/pages/home/components/WeekStrip/WeekStrip.css", completed: false },
+        { step: 5, text: "src/pages/home/components/WeekStrip/index.ts", completed: false },
+        { step: 6, text: "src/pages/home/Home.tsx", completed: false },
+        { step: 7, text: "src/pages/home/Home.spec.tsx", completed: false },
+      ],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await Promise.all([1, 2, 3, 4, 5, 6, 7].map(() => writeCall(ctx, pi)));
+  await Promise.all(
+    [2, 3, 4, 5, 6, 7].map(async (step) => {
+      const result = await registerStep(ctx, pi, step);
+      assert.equal((result as { block: boolean }).block, true);
+      assert.match(
+        (result as { reason: string }).reason,
+        /Step \d+ is not next: step 1 \(src\/domain\/weekView\.ts\) is still pending/,
+      );
+    }),
+  );
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 1);
+  assert.match(
+    pi.sentUserMessages[0]?.text ?? "",
+    /Step 1 \(src\/domain\/weekView\.ts\): call plan_step_complete\(1\)/,
+  );
+  assert.match(pi.sentUserMessages[0]?.text ?? "", /Completed: 0\/7/);
+
+  // The reply run registers every step; the plan completes without a second check.
+  await callHandler(pi, "agent_start", {}, ctx);
+  // Registration order matters (the strict cursor blocks out-of-order calls),
+  // so the reply steps stay sequential.
+  for (let step = 1; step <= 7; step++) {
+    // oxlint-disable-next-line no-await-in-loop
+    const result = await registerStep(ctx, pi, step);
+    assert.equal(result, undefined);
+  }
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 1);
+  assert.ok(pi.sentMessages.some((m) => m.message.customType === "plan-mode-complete"));
+  assert.deepEqual(lastEntryData(pi), {
+    phase: "off",
+    todos: [],
+    planFileName: "plan.md",
+  });
+});
+
+test("a partial reply fires a narrowed check for the remaining steps", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const entries = [
+    customEntry("plan-mode", {
+      phase: "executing",
+      todos: [
+        { step: 1, text: "one", completed: true },
+        { step: 2, text: "two", completed: false },
+        { step: 3, text: "three", completed: false },
+      ],
+      planFileName: "plan.md",
+    }),
+  ];
+  const { ctx } = createFakeCtx({ entries });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await writeCall(ctx, pi);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+  assert.equal(pi.sentUserMessages.length, 1);
+
+  await callHandler(pi, "agent_start", {}, ctx);
+  await registerStep(ctx, pi, 2);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 2);
+  assert.match(
+    pi.sentUserMessages[1]?.text ?? "",
+    /Step 3 \(three\): call plan_step_complete\(3\)/,
+  );
+  assert.doesNotMatch(pi.sentUserMessages[1]?.text ?? "", /plan_step_complete\(2\)/);
+  assert.match(pi.sentUserMessages[1]?.text ?? "", /Completed: 2\/3/);
+
+  await callHandler(pi, "agent_start", {}, ctx);
+  await registerStep(ctx, pi, 3);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 2);
+  assert.ok(pi.sentMessages.some((m) => m.message.customType === "plan-mode-complete"));
+});
+
+test("a text-only reply acks the missing state and closes the check", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
   const { ctx } = createFakeCtx({ entries: executingEntries() });
   await callHandler(pi, "session_start", {}, ctx);
 
   await writeCall(ctx, pi);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+  assert.equal(pi.sentUserMessages.length, 1);
+
+  await callHandler(pi, "agent_start", {}, ctx);
   await callHandler(
     pi,
-    "turn_end",
-    { message: assistantMessage([textBlock("done [DONE:1]")]) },
+    "agent_end",
+    { messages: [assistantMessage([textBlock("none completed")])] },
     ctx,
   );
 
-  assert.equal(pi.sentUserMessages.length, 0);
+  assert.equal(pi.sentUserMessages.length, 1);
+  const ack = pi.sentMessages.find((m) => m.message.customType === "plan-mode-progress-ack");
+  assert.ok(ack, "expected a progress ack");
+  assert.match(ack.message.content, /Missing registrations: 1/);
+  assert.match(ack.message.content, /Completed: 0\/1/);
+  assert.deepEqual(ack.options, { triggerTurn: false });
 });
 
-test("does not nudge when the turn made no write calls", async () => {
-  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
-  const { ctx } = createFakeCtx({ entries: executingEntries() });
-  await callHandler(pi, "session_start", {}, ctx);
-
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("read only")]) }, ctx);
-
-  assert.equal(pi.sentUserMessages.length, 0);
-});
-
-test("never nudges two turns in a row", async () => {
+test("a later write run without registration fires a fresh check", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
   const { ctx } = createFakeCtx({ entries: executingEntries() });
   await callHandler(pi, "session_start", {}, ctx);
 
   await writeCall(ctx, pi);
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("work")]) }, ctx);
-  await writeCall(ctx, pi);
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("more work")]) }, ctx);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
   assert.equal(pi.sentUserMessages.length, 1);
 
+  await callHandler(pi, "agent_start", {}, ctx);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+  assert.equal(pi.sentUserMessages.length, 1);
+
+  await callHandler(pi, "agent_start", {}, ctx);
   await writeCall(ctx, pi);
-  await callHandler(pi, "turn_end", { message: assistantMessage([textBlock("again")]) }, ctx);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
   assert.equal(pi.sentUserMessages.length, 2);
+});
+
+test("an invalid reply keeps the check closed without re-firing", async () => {
+  const { pi } = createExtension(["/virtual/cwd/plan.md"]);
+  const { ctx } = createFakeCtx({ entries: executingEntries() });
+  await callHandler(pi, "session_start", {}, ctx);
+
+  await writeCall(ctx, pi);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+  assert.equal(pi.sentUserMessages.length, 1);
+
+  await callHandler(pi, "agent_start", {}, ctx);
+  const blocked = await registerStep(ctx, pi, 99);
+  assert.equal((blocked as { block: boolean }).block, true);
+  await callHandler(pi, "agent_end", { messages: [] }, ctx);
+
+  assert.equal(pi.sentUserMessages.length, 1);
+  const ack = pi.sentMessages.find((m) => m.message.customType === "plan-mode-progress-ack");
+  assert.ok(ack, "expected a progress ack");
+  assert.match(ack.message.content, /Missing registrations: 1/);
 });
 
 // --- session_start restore ---
@@ -1874,7 +2081,14 @@ test("restores an executing phase with an empty todo list without rescanning", a
   assert.deepEqual(statusWidget.component?.render(), []);
 });
 
-test("re-scans DONE markers after the execute marker on resume", async () => {
+const toolCallBlock = (step: unknown): unknown => ({
+  type: "toolCall",
+  id: "x",
+  name: "plan_step_complete",
+  arguments: { step },
+});
+
+test("re-scans plan_step_complete tool calls after the execute marker on resume", async () => {
   const { pi } = createExtension(["/virtual/cwd/plan.md"]);
   const entries = [
     customEntry("plan-mode", {
@@ -1886,8 +2100,16 @@ test("re-scans DONE markers after the execute marker on resume", async () => {
       planFileName: "plan.md",
     }),
     customEntry("plan-mode-execute", {}),
-    messageEntry(assistantMessage([textBlock("finished [DONE:1]")])),
-    messageEntry(userMessage("[DONE:2] ignored")),
+    messageEntry(assistantMessage([toolCallBlock(1)])),
+    messageEntry(
+      assistantMessage([{ type: "toolCall", id: "y", name: "other_tool", arguments: { step: 2 } }]),
+    ),
+    messageEntry(
+      assistantMessage([{ type: "toolCall", id: "z", name: "plan_step_complete", arguments: {} }]),
+    ),
+    messageEntry(assistantMessage([{ type: "toolCall", id: "w", name: "plan_step_complete" }])),
+    messageEntry(assistantMessage([textBlock("no calls here")])),
+    messageEntry(userMessage("ignored")),
     messageEntry({ role: "assistant", content: "not an array" }),
     customEntry("other", {}),
     { type: "message" },
@@ -1909,7 +2131,7 @@ test("re-scans from the start when no execute marker exists", async () => {
       todos: [{ step: 1, text: "a", completed: false }],
       planFileName: "plan.md",
     }),
-    messageEntry(assistantMessage([textBlock("did [DONE:1]")])),
+    messageEntry(assistantMessage([toolCallBlock(1)])),
   ];
   const { ctx } = createFakeCtx({ entries });
   await callHandler(pi, "session_start", {}, ctx);
@@ -1975,4 +2197,5 @@ test("the default export registers the extension with default deps", () => {
   assert.ok(pi.commands["plan"]);
   assert.equal(pi.shortcuts.length, 1);
   assert.equal(pi.flags["plan"], false);
+  assert.ok(pi.tools["plan_step_complete"], "expected the plan_step_complete tool");
 });
