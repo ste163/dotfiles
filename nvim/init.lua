@@ -57,7 +57,6 @@ vim.api.nvim_create_autocmd("TermClose", {
   end,
 })
 
--- TEST
 -- Close the fugitive status window immediately after a successful push
 vim.api.nvim_create_autocmd("User", {
   group = fugitive_group,
