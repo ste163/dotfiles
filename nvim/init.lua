@@ -32,8 +32,12 @@ vim.api.nvim_create_autocmd("FileType", {
   group = fugitive_group,
   pattern = "fugitive",
   callback = function()
-    -- Open a real terminal for Committing
-    vim.keymap.set("n", "cc", ":term git commit -v<CR>", { buffer = true, silent = true })
+		-- Open a real terminal for Committing
+		vim.keymap.set("n", "cc", function()
+			vim.cmd("term git commit -v")
+			local buf = vim.api.nvim_get_current_buf()
+			vim.b[buf].fugitive_commit_terminal = true
+		end, { buffer = true, silent = true })
   end,
 })
 
@@ -51,8 +55,12 @@ vim.api.nvim_create_autocmd("TermOpen", {
 vim.api.nvim_create_autocmd("TermClose", {
   group = fugitive_group,
   callback = function()
+    local buf = tonumber(vim.fn.expand("<abuf>"))
+    if not vim.b[buf].fugitive_commit_terminal then
+      return
+    end
     if vim.v.event.status == 0 then
-      vim.api.nvim_buf_delete(0, { force = true })
+      vim.api.nvim_buf_delete(buf, { force = true })
       vim.schedule(function()
         vim.cmd.Git()
       end)
