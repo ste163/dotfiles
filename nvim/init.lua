@@ -24,34 +24,40 @@ require("plugins.which-key")        -- should be last to load all keybinds
 
 local fugitive_group = vim.api.nvim_create_augroup("FugitiveTerminalFix", { clear = true })
 
+-- Fugitive commit and push flow:
+--   cc              -> real terminal running `git commit -v`, flagged as the commit terminal
+--   TermClose       -> closes the flagged terminal on success and reopens :Git
+--   FugitiveChanged -> closes the status window after a successful push
 
-
---- test!
--- Use a neovim terminal for commit and push commands
+-- Replace fugitive's built-in cc (in-buffer commit UI) with a real
+-- terminal. The terminal buffer is flagged because TermClose has no way
+-- to tell what a terminal was running.
 vim.api.nvim_create_autocmd("FileType", {
   group = fugitive_group,
   pattern = "fugitive",
   callback = function()
-		-- Open a real terminal for Committing
-		vim.keymap.set("n", "cc", function()
-			vim.cmd("term git commit -v")
-			local buf = vim.api.nvim_get_current_buf()
-			vim.b[buf].fugitive_commit_terminal = true
-		end, { buffer = true, silent = true })
+    vim.keymap.set("n", "cc", function()
+      vim.cmd("term git commit -v")
+      local buf = vim.api.nvim_get_current_buf()
+      vim.b[buf].fugitive_commit_terminal = true
+    end, { buffer = true, silent = true })
   end,
 })
 
--- Handle terminal behavior (Scrolling & Auto-closing)
+-- Applies to every terminal: start in insert mode so typing reaches the
+-- shell immediately, and drop line numbers.
 vim.api.nvim_create_autocmd("TermOpen", {
   group = fugitive_group,
   callback = function()
-    vim.cmd("startinsert") -- Forces auto-scroll to the bottom
+    vim.cmd("startinsert")
     vim.opt_local.number = false
     vim.opt_local.relativenumber = false
   end,
 })
 
--- Automatically close the terminal window if the command finishes successfully and re-opens fugitive
+-- Only the flagged commit terminal is auto-managed. Success: close it
+-- and reopen the status window. Failure: leave it open so the error is
+-- visible. All other terminals exit untouched.
 vim.api.nvim_create_autocmd("TermClose", {
   group = fugitive_group,
   callback = function()
@@ -68,7 +74,11 @@ vim.api.nvim_create_autocmd("TermClose", {
   end,
 })
 
--- Close the fugitive status window immediately after a successful push
+-- Close the status window after a successful push. FugitiveResult() is
+-- event-scoped: it holds the triggering :Git job only when this event
+-- came from that job completing. Staging reloads fire the same event
+-- with no result attached, so reading the session-wide
+-- g:_fugitive_last_job here would close the window on unrelated actions.
 vim.api.nvim_create_autocmd("User", {
   group = fugitive_group,
   pattern = "FugitiveChanged",
