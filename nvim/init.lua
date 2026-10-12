@@ -24,6 +24,9 @@ require("plugins.which-key")        -- should be last to load all keybinds
 
 local fugitive_group = vim.api.nvim_create_augroup("FugitiveTerminalFix", { clear = true })
 
+
+
+--- test!
 -- Use a neovim terminal for commit and push commands
 vim.api.nvim_create_autocmd("FileType", {
   group = fugitive_group,
