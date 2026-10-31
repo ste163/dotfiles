@@ -1,8 +1,11 @@
-## MCP FIRST — codebase-memory-mcp mandatory
+## MCP FIRST — codebase-memory-mcp
 
-In a git repo, search code with the MCP tools, not grep/rg. The
-codebase-memory-mcp-enforcer extension blocks bash code search, and every
-block message names the exact call to make.
+In a git repo, search code with the MCP tools first. If MCP fails, is slow,
+or doesn't cover what you need, fall back to bash grep/rg — that's fine, no
+penalty.
+
+At session start in a git repo (or after compaction), learn the project name
+once with `list_projects()`, then use it in the calls below.
 
 Direct calls (the built-in MCP server connects at session start):
 
@@ -10,14 +13,13 @@ Direct calls (the built-in MCP server connects at session start):
 - `mcp__codebase_memory_mcp__search_graph({ ... })` — definitions, classes, routes
 - `mcp__codebase_memory_mcp__get_code_snippet({ ... })` — read a symbol's source
 - `mcp__codebase_memory_mcp__list_projects()` — learn the project name
+- `mcp__codebase_memory_mcp__index_status({ project: "<name>" })` — index freshness/coverage check
 
 Legal bash: ls, pwd, echo, readlink, stat — and grep/rg over named
 docs/config files (.md .txt .json .yaml .yml .toml .conf .ini).
 
-If the server is down: report it and stop that line of work. No bash
-fallback for code search.
-Exception: reading a file whose path you already know (from MCP results or
-user mention) — read/read_symbol is fine, no MCP call needed first.
+Reading a file whose path you already know (from MCP results or user
+mention) — read/read_symbol is fine, no MCP call needed first.
 
 ## Never commit
 You will never use git commit or git push. You make code updates, but I am the reviewer.
