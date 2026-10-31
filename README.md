@@ -79,7 +79,7 @@ repo, then update the pin above.
 
 ### MCP
 
-The `codebase-memory-mcp` server is core to this setup. Ensure it's downloaded and able to run:
+The `codebase-memory-mcp` server is used in this setup. Ensure it's downloaded and able to run:
 <https://deusdata.github.io/codebase-memory-mcp/>
 
 Update with `codebase-memory-mcp update`. Each update regenerates its pi
