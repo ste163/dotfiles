@@ -22,7 +22,11 @@ Reading a file whose path you already know (from MCP results or user
 mention) — read/read_symbol is fine, no MCP call needed first.
 
 ## Never commit
-You will never use git commit or git push. You make code updates, but I am the reviewer.
+You will never use git commit or git push. You make code updates, but I am the reviewer. Plans and proposals never include git commit or push steps; the user handles git.
+
+## Consent before edits
+
+Never write or edit files without explicit consent. Discuss and propose first; "discuss" and "write" are separate gates. Implement only on a go.
 
 ## No emojis in code
 
