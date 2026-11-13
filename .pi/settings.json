@@ -4,7 +4,7 @@
   "defaultThinkingLevel": "max",
   "enableInstallTelemetry": false,
   "followUpMode": "one-at-a-time",
-  "lastChangelogVersion": "1.4.0",
+  "lastChangelogVersion": "1.5.2",
   "packages": [
     "npm:@gotgenes/pi-permission-system",
     "npm:pi-lens",
@@ -13,5 +13,11 @@
   "theme": "rose-pine-moon",
   "warnings": {
     "anthropicExtraUsage": false
+  },
+  "extensionChangelogVersions": {
+    "{\"source\":\"npm:@gotgenes/pi-permission-system\",\"scope\":\"user\"}": "42.0.0",
+    "{\"source\":\"npm:pi-lens\",\"scope\":\"user\"}": "4.4.12",
+    "{\"source\":\"npm:@gotgenes/pi-permission-system\",\"scope\":\"project\"}": "42.0.0",
+    "{\"source\":\"npm:pi-lens\",\"scope\":\"project\"}": "4.4.7"
   }
 }
