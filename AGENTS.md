@@ -9,9 +9,10 @@ immediately.
 install.sh is the source of truth for every symlink; verify with readlink,
 never guess. Item-level links from .pi/ into ~/.pi/agent (never the whole
 dir): settings.json, APPEND_SYSTEM.md (global system-prompt rules), mcp.json,
-skills/, prompts/, themes/, extensions/. Never commit what lives only in
-~/.pi/agent: auth.json, models.json, trust.json, sessions/, npm/, git/,
-mcp-*cache.json.
+models.json, skills/, prompts/, themes/, extensions/. Never commit what lives
+only in ~/.pi/agent: auth.json, trust.json, sessions/, npm/, git/,
+mcp-*cache.json. Rule: no literal secrets in tracked files - models.json uses
+$ENV interpolation, real keys live in per-machine shell profiles.
 
 Editing a .pi/ file here = global change, no install step. New files/dirs
 need install.sh rerun.

@@ -61,6 +61,21 @@ pi update --all
 to install packages referenced in `settings.json` (package installs live under
 `~/.pi/agent/npm` and `git`, which aren't synced across machines).
 
+### Local model: Qwen3.8-Flash-Next via Strata
+
+A Qwen3.8-Flash-Next (IQ3_XXS) model server runs on the SteamOS box and is
+reachable by name from any machine on the home LAN. In pi, open `/model` and
+pick `qwen3.8-flash-next-iq3_xxs`. Per-machine requirement: the model server's
+API key in the shell profile:
+
+```sh
+export STRATA_API_KEY="sk-strata-..."
+```
+
+The key is printed on the box with `strata launch --show-key`. The
+machine-independent config lives in `.pi/models.json`; the key itself is never
+committed. See `local-llm.md` for the full setup and evaluation plan.
+
 ### Skills
 
 `.pi/skills/` is a whole-dir symlink (see `install.sh`), so every skill in the

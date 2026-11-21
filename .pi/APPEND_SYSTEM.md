@@ -82,3 +82,11 @@ plus Questions when present) updated to match.
 When plan mode is active, wrap the whole plan under a `# Plan` header:
 the section headings become `##` and the pseudo-code path blocks become
 `###`.
+
+## Worker delegation
+
+When the user approves implementation ("implement", "go ahead", or
+similar): delegate ALL file edits to the worker subagent via the
+subagent tool (agent: "worker"). The main agent plans, reads, reviews,
+runs checks, and reports - it does not edit files directly. After the
+worker finishes, review its changes against the plan before reporting.

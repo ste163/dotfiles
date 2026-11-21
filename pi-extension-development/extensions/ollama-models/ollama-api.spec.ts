@@ -24,13 +24,21 @@ const callFetchShow = (fetch: OllamaModelsDeps["fetch"]) =>
   fetchShow("m", BASE_URL, deps(fetch), 5);
 
 test("fails soft on a non-ok status, a rejected fetch, malformed JSON, and timeout", async () => {
-  assert.deepEqual(await callFetchShow(() => Promise.resolve(new Response("boom", { status: 500 }))), {
+  assert.deepEqual(
+    await callFetchShow(() => Promise.resolve(new Response("boom", { status: 500 }))),
+    {
+      ok: false,
+    },
+  );
+  assert.deepEqual(await callFetchShow(() => Promise.reject(new Error("ECONNREFUSED"))), {
     ok: false,
   });
-  assert.deepEqual(await callFetchShow(() => Promise.reject(new Error("ECONNREFUSED"))), { ok: false });
-  assert.deepEqual(await callFetchShow(() => Promise.resolve(new Response("<html>", { status: 200 }))), {
-    ok: false,
-  });
+  assert.deepEqual(
+    await callFetchShow(() => Promise.resolve(new Response("<html>", { status: 200 }))),
+    {
+      ok: false,
+    },
+  );
   assert.deepEqual(await callFetchShow(hangingFetch()), { ok: false });
 });
 

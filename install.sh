@@ -55,9 +55,11 @@ for i in "${!SRCS[@]}"; do
 done
 
 # --- Pi config (item-level symlinks, never the whole ~/.pi/agent dir) ---
-# ~/.pi/agent also holds secrets/state (auth.json, models.json, sessions/, npm/)
+# ~/.pi/agent holds real credentials (auth.json) and state (sessions/, npm/)
 # that must never be synced via a public dotfiles repo, so only known config
-# items are linked individually.
+# items are linked individually. models.json is tracked because it carries no
+# literal secrets: keys are dummies or $ENV interpolation, and real keys live
+# in per-machine shell profiles.
 PI_SRC="$DOTFILES/.pi"
 PI_DST="$HOME/.pi/agent"
 mkdir -p "$PI_DST"
@@ -67,6 +69,8 @@ PI_ITEMS=(
   "keybindings.json:file"
   "APPEND_SYSTEM.md:file"
   "mcp.json:file"
+  "models.json:file"
+  "agents:dir"
   "skills:dir"
   "prompts:dir"
   "themes:dir"
