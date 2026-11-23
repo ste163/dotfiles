@@ -21,23 +21,22 @@ Harness: pi (coding agent) against both layers. Walk-away speeds acceptable for 
 
 - Gaming PC, real SteamOS (immutable Arch, read-only root)
 - RX 9070 XT 16GB (gfx1201, RDNA4)
-- 32GB DDR4 (single channel bandwidth ~40GB/s is the CPU-offload ceiling)
+- 32GB DDR4 now (2x16GB); the board (MSI MPG B550I, ITX) has 2 slots, max 64GB via 2x32GB - see the future-state section
 - 1TB NVMe
-- Recent AMD CPU (unknown model, does not matter much for this plan)
+- 6-core AMD CPU (CPU cores peg during MoE expert overflow - observed)
 - Mac runs pi + local Ollama (search relay only)
 
-SteamOS rules: everything runs in containers (podman). Never pacman-install anything. The host only needs the kernel amdgpu driver, which ships with SteamOS. Container images bundle ROCm userspace.
+SteamOS rules: never pacman-install anything. Strata runs bare on the host (its engine package bundles ROCm wheels, nothing system-level, survives SteamOS updates). Containers (podman) only for Test B if it happens. The host only needs the kernel amdgpu driver, which ships with SteamOS.
 
 ## Test order
 
-1. Test A first: Strata engine + Qwen3.8-Flash-Next (the big efficiency bet)
-2. Test B second: rdna-boosts llama.cpp fork + Qwen3.8-27B (the boring, proven path)
-
-Both serve OpenAI-compatible APIs, so pi connects to either without changes. V4 Pro stays as the brain regardless of test results; the tests decide what work gets routed to the body.
+1. Test A WIPED: Strata removed from the box (clean cut); the timings below stay as eval data
+2. Test B DONE: rdna-boosts llama.cpp fork + Qwen3.8-27B (Q3_K_XL + MTP-2) is the shipped worker model. Option B (gpt-oss-20b) was tested and rejected - details in its section below.
+Both serve OpenAI-compatible APIs, so pi connects to either without changes. V4 Pro stays as the brain regardless; the tests decide what work gets routed to the body.
 
 ---
 
-## Test A: Strata + Qwen3.8-Flash-Next
+## Test A: Strata (WIPED - clean cut)
 
 ### What it is
 
@@ -57,21 +56,23 @@ Serves OpenAI API on localhost:8080/v1, Anthropic /v1/messages, /v1/responses. `
 
 ### Model pack choice
 
-32GB RAM is the floor. Installer recommends the Coder variant for 32GB. ISTA-DASLab packs are the recommended source (Q2_0, IQ2_XS, IQ3_XXS, IQ3_S; Coder: IQ1_M).
+What was tried, in order:
 
-Measured on RX 9070 XT 16GB (kr4ckhe4d/local-llm-benchmarks, strata.md):
+- **Qwen3.8-Flash-Next IQ3_XXS** (125B MoE, 6B active): worked, but 32GB RAM is below its floor. Measured on our box: 31.3 tok/s cold prefill, 16.4 tok/s decode, CPU pegged, GPU bouncing (expert cache misses with SSD streaming). A worker subagent doing a one-sentence README edit took minutes and was aborted.
+- **Qwen3.8-Flash-Next Coder IQ1_M** (half the experts kept, 29.6GB shard): fit better, but still too slow for a worker. Timed one-sentence worker edit: 1-2 min at default thinking effort, 52s with reasoning effort low (set via pi models.json samplingParams).
+- **Qwen3.6-35B-A3B UD-Q4_K_XL** (22.9GB, 3B active): the one that fits the 32GB tier. Timed one-sentence worker edit: **41s**. First engine token 0.188s. GPU fully loaded (15.9/15.9GiB), far less CPU involvement. Shipped - this is the worker model.
 
-- IQ3_XXS: 107-114 tok/s generation, 12 GiB RAM headroom
-- Code quality (executed differential stdlib suite): 86% no-thinking, 94% thinking-medium - the highest quality scores in the entire benchmark repo, beating dense Qwen3.8's 60-76% at 3x the speed
-- Coder IQ1_M was tried and deleted by that rig (weaker, variable quality on thinking runs)
+Strata catalog for this box, from the official docs: Strata serves Qwen3.8-Flash-Next packs (ISTA-DASLab, Unsloth, Gyro, Swift, Coder, NVFP4) and Qwen3.6-35B-A3B (Unsloth packs only). No dense models - Qwen3.8-27B does not run on Strata (that is Test B territory). Gyro-M/Gyro-S are the same 125B model memory-squeezed, not actually smaller in compute.
 
-Start with IQ3_XXS. Note: that rig had 64GB RAM; we have 32GB, expect more SSD streaming, slower but functional. The PLE table wants to live on the NVMe.
+Model management (learned the hard way): there is no delete command. Deletion is manual: `strata models explain <catalog-name>` shows the files (note: it takes the catalog name like IQ1_M, not the folder tag coder-iq1_m), then rm the model folder, the packs/ dir and the mtp/ dir in the data folder. The IQ3_XXS and Coder share shard 2 via hard link - deleting one does not hurt the other. After deleting all Flash-Next models the disk went from 164G to 344G free.
+
+Strata was fully removed from the box (terminal, engine, data, config, shell profile). The Flash-Next family is feasible - measured 107-114 tok/s decode and 94% code quality thinking-medium on a 64GB rig - but only with 64GB of RAM. That is a potential future improvement, not a current path.
 
 ### Risks / unknowns
 
 - Young project, releases multiple times a day, single maintainer
 - Not validated beyond 16K context on the 9070 XT specifically - must test against real repos
-- pi tool-calling against Strata's OpenAI endpoint is untested - run the tool-calling probe early
+- pi tool-calling against Strata's OpenAI endpoint: VERIFIED - the worker subagent (pinned to the strata provider) made real edits through pi on Qwen3.6-35B-A3B.
 - Fast-moving interfaces; pin a working version once found
 
 ---
@@ -98,7 +99,28 @@ Unsloth Dynamic 3.0 quants. Warning: same filenames for v2/v3 builds; v3 is curr
 | UD-Q3_K_XL | 12.2GB | 3.802 | 0.0263 | balanced, up to 128K ctx |
 | UD-IQ3_XXS | 10.2GB | 3.148 | 0.0589 | max context, 192K at q4_0 KV |
 
-Start: IQ4_XS, 32K context.
+Current on the box: IQ4_XS, 32K, reasoning-budget 0 (worker timings in the eval section). Next: Option A below.
+
+### Option A: Q3_K_XL + MTP draft depth 2 (next test)
+
+Independent measurement on an RX 9070 XT 16GB (roksblog.de, Aug 2026, llama.cpp build 10640, ROCm under WSL2):
+
+```bash
+llama-server -m models/Qwen3.8-27B-UD-Q3_K_XL.gguf -ngl 999 \
+  -c 65536 -fa on --jinja --reasoning on --reasoning-effort low \
+  --reasoning-budget 1024 --no-reasoning-preserve --reasoning-format auto \
+  --spec-type draft-mtp --spec-draft-n-max 2 \
+  --cache-type-k q4_0 --cache-type-v q4_0 \
+  -b 1024 -ub 256 --parallel 1 --host 0.0.0.0 --port 8080
+```
+
+Measured on that card: 48.78 tok/s short context, ~39 tok/s at ~21.6K context, ~795-1022 tok/s prefill at depth, 75.3% draft acceptance. The key discovery: `--spec-draft-n-max 2` shrinks the MTP draft context to ~178 MiB (against ~2.2GB for the full drafter), which is why MTP fits a 16GB card at all. Their rule: full GPU offload first, MTP second. VRAM ~15.7/16GB - tight.
+
+Our adaptation for the SteamOS box: same flags but `-c 32768` to start (desktop compositor holds more VRAM than their rig). The file is Qwen3.8-27B-UD-Q3_K_XL.gguf, 13,146,393,504 bytes (Dynamic 3.0, verified against the HF listing). The rdna-boosts fork also has its own adaptive MTP (`--spec-type draft-mtp-adaptive,ngram-mod`); try the plain upstream flags first since they are the measured config, the fork variant second.
+
+### Option B: gpt-oss-20b (after A)
+
+OpenAI's Apache-2.0 MoE (20.9B total, ~3.6B active, 24 layers, MXFP4 native ~12.8GiB), designed for 16GB cards. Independent evidence: an 8-task mechanically-scored coding eval on a 16GB card had it pass 8/8 including a two-turn agentic tool-calling task, fully resident at 178-190 tok/s (techfuelhq, Aug 2026); community reports on the RX 9070 XT put it at ~70-154 tok/s on llama.cpp (llamaperf, Nov 2026). VERDICT: REJECTED, model file and container deleted. Measured on this box: decode 108-142 tok/s (fastest of anything tested), raw single tool call passes, write-only task passes - but every multi-step agent task failed. Two failure modes, both documented upstream: (1) under --reasoning-budget 0 it claimed tool calls it never made (3 of 4 runs; budget-0 is documented as aberrant for gpt-oss, which cannot not-reason, per PR #20297 and PR #20393); (2) with correct flags (--reasoning on --reasoning-effort low) it looped in its reasoning channel for the full 16,384-token output cap without emitting any tool call - 2 of 2 battery runs, 216s and 245s, matching llama.cpp issue #30377 (gpt-oss reasoning-channel loop, tool_calls=0, terminates at token budget). Single-step tasks passed (no-tool 13s, write-only 23s) but the worker's job is multi-step edits. Also relevant: pi + gpt-oss on llama.cpp is a known-broken combo (issue #32624, filed Nov 19 2026 against pi 1.5.2, harmony tokens inside tool arguments, strict PEG parse 500s) and gpt-oss requires reasoning_content round-tripping on tool turns which pi does not do (issue #27720). Qwen stays the worker.
 
 ### Verified server config (measured on RX 9070 XT)
 
@@ -144,7 +166,7 @@ Qwen3.6-35B-A3B MoE (20.6GB, -ncmoe 16 floor on 16GB, 128K ctx, 39-44 tok/s): th
 ### pi wiring
 
 - Both engines speak OpenAI /v1/chat/completions. pi needs model + endpoint config only.
-- Tool calling: verified working on Qwen3.x through llama.cpp (single + parallel probe). Unverified on Strata - test first thing.
+- Tool calling: verified working through pi against Strata's OpenAI endpoint (worker subagent on Qwen3.6-35B-A3B made real edits; reasoning effort low via models.json samplingParams).
 
 ---
 
@@ -161,6 +183,20 @@ Purpose: DeepSeek V4 Pro vs local engines, on our specific repos, execution-grad
 3. Score per task: pass/fail, attempt count, wall time, tokens burned. Greedy sampling for repeatability.
 4. Separate judge model for high-level readout (another API model, not the one under test).
 5. Engine dimension: where a model runs on both engines, run it on both. Flash-Next GGUF also runs on rdna-boosts (qwen4exp support in block 11) - a third arm that isolates engine vs model. Optional.
+
+### Final worker-model battery (write+delete probe, 10 runs per model)
+
+Identical task each run: worker subagent writes worker-probe.md with a fixed paragraph, then deletes it. Timed wall-to-wall per run. Failures logged, no retries.
+
+| Model | Runs | Pass | Median | Range | Notes |
+| --- | --- | --- | --- | --- | --- |
+| DeepSeek V4 Pro (cloud, brain) | 10 | 10/10 | 13.5s | 12-17s | baseline |
+| Qwen3.8-27B Q3_K_XL + MTP-2 (local, body) | 10 | 10/10 | 30s | 29-38s | shipped worker |
+| gpt-oss-20b MXFP4 (local) | 5 + 2 | 0 | - | - | reasoning loops, zero tool calls (details in Option B) |
+
+Per-run Qwen times: 32, 38, 30, 35, 30, 29, 35, 30, 29, 30s. Per-run DeepSeek times: 14, 15, 17, 13, 14, 14, 12, 13, 13, 14s.
+
+Readout: the local worker is 2.2x slower per task than the cloud brain at zero marginal cost, with identical 10/10 reliability on this task class. The ~30s floor is mostly fixed overhead: child pi boot plus several LLM round-trips per edit, not slow decode (decode measured 48 tok/s).
 
 ### Probe designs to borrow (open source, execution-based)
 
@@ -179,6 +215,24 @@ V4 Pro wins pass rate on the hard application-repo tasks (DeepSWE 62.7 vs 42.2, 
 ### Primary measured sources (this hardware)
 
 - https://github.com/kr4ckhe4d/local-llm-benchmarks - measured llama.cpp on RX 9070 XT: model matrix, quants, KLD, MTP, 128K context, agent harnesses (pi-local.sh, claude-harness.md), strata.md (Strata/Flash-Next numbers), real-world-testing.md (agentic runs). The single most valuable reference.
+
+### Second-round sources (model selection for the worker, Nov 2026)
+
+- https://www.roksblog.de/can-a-16gb-amd-gpu-run-a-local-ai-agent-rocm-llama-cpp-hermes-in-wsl2/ - measured Qwen3.8-27B Q3_K_XL + MTP draft depth 2 on an RX 9070 XT 16GB: 48.8 tok/s short, ~39 at 21K context, 178 MiB drafter, full GPU offload
+- https://llamaperf.com/gpu/rx-9070-xt-16gb - community report aggregator for this exact card (27 reports as of Nov 21, 2026): Qwen3.8-27B IQ3_M 65 tok/s, gpt-oss-20b ~154 tok/s class, ExLlamaV3 Qwen3.8 ~150 tok/s, Qwen3 8B 98.8 tok/s
+- https://techfuelhq.com/articles/best-local-llm-coding-2026/ - 8-task mechanically-scored coding eval on a 16GB card (Aug 2026): gpt-oss:20b 8/8 including two-turn tool calling at 178-190 tok/s; Devstral Small 2 6/8 but only 4K context; Qwen3-Coder 30B 6/8 with speed hostage to free RAM
+- https://rigperdollar.com/guides/best-local-llm-16gb-vram/ - 16GB fit/context math (Nov 13, 2026): gpt-oss-20b full 128K context on 16GB; JetBrains Mellum2.1 12B-A2.5B (8GB) purpose-built for agentic repo work at full 128K; Devstral Small only 3-7K context on 16GB
+- https://kingy.ai/blog/best-local-ai-models-16gb/ - board scores on 16GB cards (Nov 15, 2026): Qwen3.8-27B UD-IQ2_S (8.37GB) scored 97.9 and fits with 4.7GB spare; the 3-bit file needs ~15GB at 8K under their conservative fit rule
+- https://atomic.chat/blog/guides/best-local-llm-16gb - 16GB model picks (Aug 23, 2026): Qwen3.8-27B AD-IQ3_S 13.8GB with ~8K practical context; Ornith 1.5 35B-A3B AD-IQ3_XXS-IQ2_S 13.7GB fully GPU-resident agentic-coding candidate (proprietary quant, RDNA4 unverified)
+
+### gpt-oss on llama.cpp: the rejection evidence (issues and PRs, Nov 2026)
+
+- https://github.com/ggml-org/llama.cpp/issues/30377 - gpt-oss-120b loops in reasoning channel, never emits tool call, terminates at token budget (tool_calls=0) - the exact failure our battery measured on the 20B
+- https://github.com/ggml-org/llama.cpp/issues/32624 - pi 1.5.2 driving gpt-oss-120b: harmony tokens inside tool arguments break the strict PEG parse, server 500s, generation discarded (open as of Nov 19, 2026; still unfixed on current master)
+- https://github.com/ggml-org/llama.cpp/issues/27720 - gpt-oss goes erratic when the client does not round-trip reasoning_content on tool-call turns (0/120 failures with it, 7/120 without)
+- https://github.com/ggml-org/llama.cpp/pull/20297 - reasoning-budget machinery; budget-0 on a reasoning-trained model is documented as causing aberrant behavior
+- https://github.com/ggml-org/llama.cpp/pull/20393 - gpt-oss parser rework: model is 'incapable of not reasoning', emits single tool calls only, parallel-call logic removed
+
 - https://github.com/stew675/llama-cpp-rdna-boosts - the RDNA patch set, releases, ghcr containers
 - https://github.com/Niko1221/Strata - the Strata engine
 - https://github.com/sorenfalch/llama.cpp-rocm-rdna4 - podman ROCm 10 container build for gfx1201, rdna-boosts validation, build gotchas
@@ -210,20 +264,36 @@ V4 Pro wins pass rate on the hard application-repo tasks (DeepSWE 62.7 vs 42.2, 
 
 ---
 
+## Future state: 64GB DDR4
+
+The board (MSI MPG B550I, ITX, 2 RAM slots) maxes at 64GB via 2x32GB DDR4. Cost roughly $350-500 now; DRAM prices are rising (DDR4 being wound down, HBM fab shifts), so if we want this, buy sooner rather than later.
+
+What 64GB unlocks:
+
+- Strata Flash-Next IQ3_XXS fully RAM-resident: the benchmark rig with 64GB measured 107-114 tok/s decode and 94% code quality thinking-medium (the highest in the repo) - our 32GB box got 16.4 tok/s on the same model because it streams experts from SSD.
+- Coder IQ1_M and Q2_0 packs with real headroom.
+- Qwen3.8-27B Q6_K on llama.cpp (13x lower KLD than Q3_K_XL; needs the RAM because it does not fit the card).
+- Any future thinking-heavy local model that wants resident experts.
+
+Why not now: the Qwen3.6-35B-A3B worker works (41s tiny edit, correct). The upgrade is deferred until the eval shows a quality gap that bigger resident models would fix, or until DRAM prices make waiting clearly worse.
+
+Feasibility of Flash-Next is gated on this upgrade only.
+
+---
+
 ## Open questions
 
-1. Strata on 32GB RAM: which pack actually works (IQ3_XXS vs Coder IQ1_M)? Expect SSD streaming; measure.
-2. Strata context beyond 16K on 9070 XT: unvalidated. Real-repo sessions decide.
-3. pi tool-calling against Strata's OpenAI endpoint: untested. Run the get_probe_token probe before anything else.
-4. Judge model for eval readout: which model, same for all runs.
-5. SteamOS container runtime: podman ships on SteamOS, but confirm container image compatibility (podman vs docker) before pulling.
-6. Routing mechanics: how does pi pick brain vs body per task? Options: manual per-repo/model switch, task-class rules, or start local and escalate to V4 Pro on failure. Decide after the eval produces the routing table.
+1. Judge model for eval readout: which model, same for all runs.
+2. Routing mechanics: how does pi pick brain vs body per task? Options: manual per-repo/model switch, task-class rules, or start local and escalate to V4 Pro on failure. Decide after the eval produces the routing table.
+3. 64GB DDR4 upgrade: buy now (prices rising) or defer? See the future-state section.
+4. Test B: run rdna-boosts + Qwen3.8-27B - the path forward after the Strata wipe.
 
 ## Fresh-context checklist
 
-- Test A first (Strata + Flash-Next IQ3_XXS), Test B second (rdna-boosts + Qwen3.8 IQ4_XS).
+- Test A wiped (Strata removed, clean cut). Test B (rdna-boosts + Qwen3.8 IQ4_XS) is the path forward.
+- Test B shipped: Qwen3.8-27B Q3_K_XL + MTP-2 on the rdna-boosts fork is the worker (qwen container, 10/10 battery at 30s median). gpt-oss-20b rejected and deleted (multi-step reasoning loops, upstream #30377). DeepSeek cloud baseline: 13.5s median.
 - Reasoning budget, KV type matching, thread count, MTP context cap: see Test B traps.
-- Never pacman on SteamOS. Containers only.
+- Never pacman on SteamOS. Strata runs bare on the host; containers only for Test B.
 - Ollama stays on the Mac, signed in, for search. Extension hits localhost:11434.
 - Eval: execution-graded repo tasks, borrowed probe scripts, isolated SWE-bench-style harness, judge model for readout, engine as a test dimension.
 - V4 Pro stays as the brain. Eval output is a routing table, not a replacement decision.

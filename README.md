@@ -50,7 +50,7 @@ brew install btop
 
 ## pi
 
-Install from <https://pi.dev/>
+Install from <https://pi.dev/> A `worker` subagent does file edits in this repo (see `.pi/agents/worker.md`). The repo's local-model history lives in `local-llm.md`. Timed worker tests are recorded in `local-llm.md`. The worker model lives on the SteamOS box and is served by llama.cpp.
 
 After running `install.sh` (and after `pi` is installed), manually run:
 
@@ -61,20 +61,26 @@ pi update --all
 to install packages referenced in `settings.json` (package installs live under
 `~/.pi/agent/npm` and `git`, which aren't synced across machines).
 
-### Local model: Qwen3.8-Flash-Next via Strata
+### Local LLM (SteamOS worker)
 
-A Qwen3.8-Flash-Next (IQ3_XXS) model server runs on the SteamOS box and is
-reachable by name from any machine on the home LAN. In pi, open `/model` and
-pick `qwen3.8-flash-next-iq3_xxs`. Per-machine requirement: the model server's
-API key in the shell profile:
+The `worker` subagent runs against a local Qwen3.8-27B (Q3_K_XL, MTP draft 2)
+served by llama-server in a podman container on the SteamOS box. Model
+management is one command each way:
 
 ```sh
-export STRATA_API_KEY="sk-strata-..."
+ssh deck@steamdeck.local   # into the box
+podman start qwen          # start serving the worker model
+podman stop qwen           # stop serving
 ```
 
-The key is printed on the box with `strata launch --show-key`. The
-machine-independent config lives in `.pi/models.json`; the key itself is never
-committed. See `local-llm.md` for the full setup and evaluation plan.
+Notes:
+
+- After `podman start qwen` the model loads in ~30s; it serves an OpenAI-compatible
+  API on port 8080, reachable as `steamdeck.local:8080`.
+- pi on this Mac reaches it through the `steambox` provider in
+  `.pi/models.json`; the worker subagent pin lives in `.pi/agents/worker.md`.
+- Power the box off when done; nothing auto-starts.
+- Full local-model history and the battery results: `local-llm.md`.
 
 ### Skills
 
