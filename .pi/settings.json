@@ -17,7 +17,7 @@
   "extensionChangelogVersions": {
     "{\"source\":\"npm:@gotgenes/pi-permission-system\",\"scope\":\"user\"}": "42.2.0",
     "{\"source\":\"npm:pi-lens\",\"scope\":\"user\"}": "4.5.1",
-    "{\"source\":\"npm:@gotgenes/pi-permission-system\",\"scope\":\"project\"}": "42.0.0",
-    "{\"source\":\"npm:pi-lens\",\"scope\":\"project\"}": "4.4.12"
+    "{\"source\":\"npm:@gotgenes/pi-permission-system\",\"scope\":\"project\"}": "42.2.1",
+    "{\"source\":\"npm:pi-lens\",\"scope\":\"project\"}": "4.5.2"
   }
 }
